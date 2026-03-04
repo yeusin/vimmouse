@@ -1,6 +1,5 @@
 """Vimium-style hint overlay for clicking UI elements."""
 
-import math
 import os
 import objc
 import Quartz
@@ -67,9 +66,9 @@ _KEY_SLASH = 44
 _KEY_SPACE = 49
 _KEY_I = 34
 _KEY_W = 13
-_MOUSE_S0 = 6        # base sensitivity (pixels per step)
-_MOUSE_STEP_MAX = 60  # cap on maximum step size
-_MOUSE_ACCEL_K = 0.04  # acceleration constant for S(f) = S0 * e^(k*f)
+_MOUSE_S0 = 10        # base sensitivity (pixels per step)
+_MOUSE_STEP_MAX = 100  # cap on maximum step size
+_MOUSE_RAMP_FRAMES = 30  # frames to reach max speed
 _CTRL_FLAG = 1 << 18  # NSEventModifierFlagControl
 
 
@@ -459,17 +458,16 @@ class HintOverlay:
     # -- Mouse movement --
 
     def move_mouse(self, dx, dy, repeat=False):
-        """Move the mouse cursor with exponential acceleration: S(f) = S0 * e^(k*f)."""
+        """Move the mouse cursor with easeOutCubic acceleration."""
         direction = (dx, dy)
         if repeat and self._mouse_dir == direction:
-            self._mouse_repeat_count += 1
+            self._mouse_repeat_count = min(self._mouse_repeat_count + 1, _MOUSE_RAMP_FRAMES)
         else:
             self._mouse_repeat_count = 0
         self._mouse_dir = direction
-        step = min(
-            int(_MOUSE_S0 * math.exp(_MOUSE_ACCEL_K * self._mouse_repeat_count)),
-            _MOUSE_STEP_MAX,
-        )
+        t = self._mouse_repeat_count / _MOUSE_RAMP_FRAMES
+        ease = 4 * t ** 3 if t < 0.5 else 1 - (-2 * t + 2) ** 3 / 2  # easeInOutCubic
+        step = int(_MOUSE_S0 + (_MOUSE_STEP_MAX - _MOUSE_S0) * ease)
         x, y = mouse.get_cursor_position()
         mouse.move_cursor(x + dx * step, y + dy * step)
 
