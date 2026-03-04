@@ -16,16 +16,11 @@ class HotkeyManager:
         self.flags = Quartz.kCGEventFlagMaskCommand | Quartz.kCGEventFlagMaskShift
         self.callback = None
         self.suspended = False
-        self.capture_all = False
         self.tap = None
 
     def suspend(self, value=True):
         """Temporarily suspend/resume hotkey interception."""
         self.suspended = value
-
-    def set_capture_all(self, value=True):
-        """When True, all key events are swallowed (except the hotkey itself)."""
-        self.capture_all = value
 
     def get_hotkey(self):
         """Return current (keycode, flags) tuple."""
@@ -74,17 +69,10 @@ class HotkeyManager:
                 event, Quartz.kCGKeyboardEventKeycode
             )
             flags = Quartz.CGEventGetFlags(event) & MODIFIER_MASK
-            
-            # If it's the hotkey, always handle it
             if keycode == self.keycode and flags == self.flags:
                 if self.callback:
                     self.callback()
                 return None  # Suppress the event
-
-            # If we're capturing all, swallow everything else
-            if self.capture_all:
-                return None
-
         return event
 
 
@@ -93,10 +81,6 @@ _manager = HotkeyManager()
 
 def suspend(value=True):
     _manager.suspend(value)
-
-
-def set_capture_all(value=True):
-    _manager.set_capture_all(value)
 
 
 def get_hotkey():

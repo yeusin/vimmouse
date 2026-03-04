@@ -327,7 +327,6 @@ class HintOverlay:
     def _click_and_refresh(self, x, y):
         """Hide hints, click at (x, y) in the target app, then refresh hints."""
         self._clicking = True
-        hotkey.set_capture_all(True)
         for _, label, _ in self.labels:
             label.setHidden_(True)
         # Give focus to target app so click lands correctly
@@ -338,17 +337,16 @@ class HintOverlay:
     def _perform_click_and_refresh(self, x, y):
         """Execute the click and refresh hints afterward."""
         if not self.window:
-            hotkey.set_capture_all(False)
             return
         # Hide overlay so the click lands on the target app
         self.window.orderOut_(None)
         mouse.click(x, y)
-        AppHelper.callLater(0.3, self._reclaim_and_refresh)
+        self._reclaim_and_refresh()
+        # AppHelper.callLater(0.3, self._reclaim_and_refresh)
 
     def _reclaim_and_refresh(self):
         """Reclaim key window and refresh hints after a click."""
         self._clicking = False
-        hotkey.set_capture_all(False)
         if not self.window:
             return
         # Update target to whichever app is now frontmost
@@ -356,8 +354,8 @@ class HintOverlay:
         if front.processIdentifier() != os.getpid():
             self._prev_app = front
             self._pid = front.processIdentifier()
-        self.refresh()
         self._activate_overlay_window()
+        self.refresh()
 
     def refresh(self):
         """Re-collect elements and refresh hints."""
@@ -367,8 +365,6 @@ class HintOverlay:
 
     def dismiss(self):
         """Dismiss the overlay without action."""
-        self._clicking = False
-        hotkey.set_capture_all(False)
         self._stop_watching_focus()
         if self.window:
             self.window.orderOut_(None)
