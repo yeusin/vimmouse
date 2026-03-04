@@ -216,6 +216,8 @@ def _collect_clickable(root):
                 results.append({"element": element, "role": role,
                                 "position": position, "size": size})
         children = _get_attr(element, "AXChildren")
+        if not children:
+            children = _get_attr(element, "AXVisibleChildren")
         if children:
             stack.extend(children)
     return results
@@ -253,21 +255,7 @@ def get_clickable_elements(pid):
         if not (ex + ew > bx and ex < bx + bw
                 and ey + eh > by and ey < by + bh):
             continue
-        # Hit-test at element center to verify it's actually on screen
-        cx = ex + ew / 2
-        cy = ey + eh / 2
-        err, hit = AX.AXUIElementCopyElementAtPosition(app_ref, cx, cy, None)
-        if err != 0 or hit is None:
-            continue
-        # Walk up from hit to see if it's our element (or a child of it)
-        current = hit
-        for _ in range(10):
-            if current is None:
-                break
-            if current == el["element"]:
-                visible.append(_enrich_element(el))
-                break
-            current = _get_attr(current, "AXParent")
+        visible.append(_enrich_element(el))
 
     return visible
 

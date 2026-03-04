@@ -161,7 +161,12 @@ class HintWindow(NSWindow):
     def keyDown_(self, event):
         code = event.keyCode()
         flags = event.modifierFlags()
+        cmd = flags & (1 << 20)  # NSEventModifierFlagCommand
         ctrl = flags & _CTRL_FLAG
+        # Pass Cmd+key combos through to the target app (Cmd+W, Cmd+Tab, Cmd+`, etc.)
+        if cmd and not ctrl:
+            self.overlay.passthrough_key(event)
+            return
         if code == _KEY_BACKSPACE:
             self.overlay.backspace()
         elif ctrl and code == _KEY_B:
@@ -271,6 +276,7 @@ class HintOverlay:
             self.window = None
         self.labels = []
         self.typed = ""
+        self._win_hint_cache = {}
         NSApplication.sharedApplication().setActivationPolicy_(2)  # Prohibited
         if self._prev_app:
             self._prev_app.activateWithOptions_(0)
@@ -403,7 +409,9 @@ class HintOverlay:
         self.labels = []
         self.typed = ""
 
-        windows = self._get_visible_windows()
+        # Reserve at least 10 first-chars for element hints (10 × 19 = 190 hints)
+        max_win_hints = len(_HINT_CHARS) - 10
+        windows = self._get_visible_windows()[:max_win_hints]
         win_assignments, used_chars = self._assign_window_hints(windows)
         el_hints = self._generate_element_hints(len(elements), used_chars)
 
@@ -492,6 +500,26 @@ class HintOverlay:
             elements = accessibility.get_clickable_elements(self._pid)
             self._populate(elements)
 
+    # -- Key passthrough --
+
+    def passthrough_key(self, event):
+        """Forward a key event to the target app by briefly activating it."""
+        cg_event = event.CGEvent()
+        if not cg_event or not self._prev_app:
+            return
+        # Hide overlay so target app can receive focus and process the key
+        self._clicking = True
+        if self.window:
+            self.window.orderOut_(None)
+        self._prev_app.activateWithOptions_(0)
+        # Post both keydown and keyup
+        Quartz.CGEventPost(Quartz.kCGSessionEventTap, cg_event)
+        keyup = Quartz.CGEventCreateCopy(cg_event)
+        Quartz.CGEventSetType(keyup, Quartz.kCGEventKeyUp)
+        Quartz.CGEventPost(Quartz.kCGSessionEventTap, keyup)
+        # Reclaim overlay after a short delay to let the app process the key
+        AppHelper.callLater(0.1, self._reclaim_and_refresh)
+
     # -- Clicking --
 
     def mouse_back(self):
@@ -514,7 +542,7 @@ class HintOverlay:
         self._hide_all_labels()
         if self._prev_app:
             self._prev_app.activateWithOptions_(0)
-        AppHelper.callLater(0.15, lambda: self._perform_click_and_refresh(x, y))
+        self._perform_click_and_refresh(x, y)
 
     def _perform_click_and_refresh(self, x, y):
         """Execute the click and refresh hints afterward."""
@@ -657,7 +685,7 @@ class HintOverlay:
             self._prev_app = app
             self._pid = pid
         self._raise_window(pid, bounds)
-        AppHelper.callLater(0.15, self._activate_and_refresh)
+        self._activate_and_refresh()
 
     def _raise_window(self, pid, bounds):
         """Raise a specific window by matching its position/size via Accessibility."""
