@@ -108,6 +108,7 @@ def main():
             status_bar_ctrl._status_item.setTitle_("VM")
 
     overlay = hint_overlay.HintOverlay(on_mode_change=on_mode_change)
+    status_bar_ctrl._settings_ctrl._overlay = overlay
 
     def on_hotkey():
         # Schedule on main thread since CGEventTap callback runs on CF runloop

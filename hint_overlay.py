@@ -21,6 +21,7 @@ from AppKit import (
 from PyObjCTools import AppHelper
 import ApplicationServices as AX
 import accessibility
+import config
 import mouse
 
 log = logging.getLogger(__name__)
@@ -46,8 +47,6 @@ _WM_MODE_COLOR = (0.5, 0.25)
 _WM_MODE_FONT_SIZE = 16
 
 
-_HINT_CHARS = "ACDEFGMNOPQRSTUVXYZ"  # excludes H,J,K,L (movement), I (insert), B/W (back/forward)
-
 # macOS hardware key codes → Latin letters (input-source-independent)
 _KEYCODE_TO_CHAR = {
     0: "a", 1: "s", 2: "d", 3: "f", 4: "h", 5: "g", 6: "z", 7: "x",
@@ -60,21 +59,36 @@ _KEYCODE_TO_CHAR = {
 }
 _KEY_ESCAPE = 53
 _KEY_BACKSPACE = 51
-_KEY_H = 4
-_KEY_J = 38
-_KEY_K = 40
-_KEY_L = 37
-_KEY_B = 11
-_KEY_F = 3
-_KEY_SLASH = 44
-_KEY_SPACE = 49
-_KEY_I = 34
-_KEY_W = 13
 _MOUSE_S0 = 10        # base sensitivity (pixels per step)
 _MOUSE_STEP_MAX = 100  # cap on maximum step size
 _MOUSE_RAMP_FRAMES = 30  # frames to reach max speed
 _CTRL_FLAG = 1 << 18  # NSEventModifierFlagControl
 _DOUBLE_ESC_INTERVAL = 0.3  # seconds between two Escape presses
+
+_ALL_ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+def _build_binding_lookup(bindings):
+    """Build a dict mapping (keycode, ctrl_bool) → action from keybindings config."""
+    lookup = {}
+    for action, spec in bindings.items():
+        specs = spec if isinstance(spec, list) else [spec]
+        for s in specs:
+            key = (s["keycode"], bool(s.get("ctrl", False)))
+            lookup[key] = action
+    return lookup
+
+
+def _compute_hint_chars(bindings):
+    """Return hint chars string excluding keys bound to actions."""
+    bound_keycodes = set()
+    for spec in bindings.values():
+        specs = spec if isinstance(spec, list) else [spec]
+        for s in specs:
+            if not s.get("ctrl"):
+                bound_keycodes.add(s["keycode"])
+    excluded = {_KEYCODE_TO_CHAR.get(kc, "").upper() for kc in bound_keycodes}
+    return "".join(c for c in _ALL_ALPHA if c not in excluded)
 
 
 def _element_position(el):
@@ -170,7 +184,7 @@ class HintWindow(NSWindow):
         code = event.keyCode()
         flags = event.modifierFlags()
         cmd = flags & (1 << 20)  # NSEventModifierFlagCommand
-        ctrl = flags & _CTRL_FLAG
+        ctrl = bool(flags & _CTRL_FLAG)
         # Pass Cmd+key combos through to the target app (Cmd+W, Cmd+Tab, Cmd+`, etc.)
         if cmd and not ctrl:
             self.overlay.passthrough_key(event)
@@ -185,27 +199,30 @@ class HintWindow(NSWindow):
             return
         if code == _KEY_BACKSPACE:
             self.overlay.backspace()
-        elif ctrl and code == _KEY_B:
-            self.overlay.scroll(3)
-        elif ctrl and code == _KEY_F:
-            self.overlay.scroll(-3)
-        elif code == _KEY_H:
+            return
+
+        action = self.overlay._binding_lookup.get((code, ctrl))
+        if action == "move_left":
             self.overlay.move_mouse(-1, 0, event.isARepeat())
-        elif code == _KEY_J:
+        elif action == "move_down":
             self.overlay.move_mouse(0, 1, event.isARepeat())
-        elif code == _KEY_K:
+        elif action == "move_up":
             self.overlay.move_mouse(0, -1, event.isARepeat())
-        elif code == _KEY_L:
+        elif action == "move_right":
             self.overlay.move_mouse(1, 0, event.isARepeat())
-        elif code == _KEY_B and not ctrl:
+        elif action == "scroll_up":
+            self.overlay.scroll(3)
+        elif action == "scroll_down":
+            self.overlay.scroll(-3)
+        elif action == "back":
             self.overlay.mouse_back()
-        elif code == _KEY_W:
+        elif action == "forward":
             self.overlay.mouse_forward()
-        elif code == _KEY_SPACE:
+        elif action == "click":
             self.overlay.click_at_cursor()
-        elif code == _KEY_I:
+        elif action == "insert_mode":
             self.overlay.enter_insert_mode()
-        elif code == _KEY_SLASH:
+        elif action == "toggle_hints":
             self.overlay.toggle_hints()
         elif code in _KEYCODE_TO_CHAR and _KEYCODE_TO_CHAR[code].isalpha():
             self.overlay.type_char(_KEYCODE_TO_CHAR[code].upper())
@@ -233,6 +250,13 @@ class HintOverlay:
         self._insert_source = None
         self._insert_window = None
         self._last_escape_time = 0
+        self.reload_keybindings()
+
+    def reload_keybindings(self):
+        """Load keybindings from config and rebuild lookup tables."""
+        self._bindings = config.load_keybindings()
+        self._binding_lookup = _build_binding_lookup(self._bindings)
+        self._hint_chars = _compute_hint_chars(self._bindings)
 
     # -- Helpers --
 
@@ -386,7 +410,7 @@ class HintOverlay:
 
     def _assign_window_hints(self, windows):
         """Assign single-char hints to windows, reusing cached assignments."""
-        chars = _HINT_CHARS
+        chars = self._hint_chars
         used = set()
         assignments = []
 
@@ -421,7 +445,7 @@ class HintOverlay:
 
     def _generate_element_hints(self, count, used_chars):
         """Generate two-letter hints from chars not used by windows."""
-        chars = _HINT_CHARS
+        chars = self._hint_chars
         remaining = [c for c in chars if c not in used_chars]
         hints = []
         for first in remaining:
@@ -439,7 +463,7 @@ class HintOverlay:
         self.typed = ""
 
         # Reserve at least 10 first-chars for element hints (10 × 19 = 190 hints)
-        max_win_hints = len(_HINT_CHARS) - 10
+        max_win_hints = len(self._hint_chars) - 10
         windows = self._get_visible_windows()[:max_win_hints]
         win_assignments, used_chars = self._assign_window_hints(windows)
         el_hints = self._generate_element_hints(len(elements), used_chars)
