@@ -86,10 +86,33 @@ def _is_interactive(role, element):
     return False
 
 
-def _collect_elements(element, results, depth=0, max_depth=30, parent_clickable=False):
+def _child_text(element, max_depth=3):
+    """Gather visible text from children (for labeling clickable containers)."""
+    if max_depth <= 0:
+        return ""
+    children = _get_attr(element, "AXChildren")
+    if not children:
+        return ""
+    parts = []
+    for child in children:
+        role = _get_attr(child, "AXRole")
+        if role == "AXStaticText":
+            v = _get_attr(child, "AXValue")
+            if v:
+                parts.append(str(v))
+        elif role == "AXImage":
+            d = _get_attr(child, "AXDescription") or ""
+            if d:
+                parts.append(d)
+        else:
+            parts.append(_child_text(child, max_depth - 1))
+        if len(parts) >= 4:
+            break
+    return " ".join(p for p in parts if p)
+
+
+def _collect_elements(element, results, parent_clickable=False):
     """Recursively collect interactive elements from the AX tree."""
-    if depth > max_depth:
-        return
 
     role = _get_attr(element, "AXRole")
     # Skip static text / images that are children of a clickable element (they're just labels)
@@ -106,9 +129,17 @@ def _collect_elements(element, results, depth=0, max_depth=30, parent_clickable=
             value_str = str(value) if value is not None else ""
             subrole = _get_attr(element, "AXSubrole") or ""
             help_text = _get_attr(element, "AXHelp") or ""
-            label = title or desc or value_str or help_text or subrole or role or ""
+            label = title or desc or value_str or help_text or subrole or ""
             clickable = _is_clickable(role, element)
-            if label and label not in ("AXGroup", "AXStaticText", "AXImage"):
+            # For clickable elements with no label, try to get text from children
+            if not label and clickable:
+                label = _child_text(element)
+            # Exclude non-clickable elements with only a generic role as label
+            if not label and not clickable:
+                pass  # skip — no useful label and not clickable
+            elif label or clickable:
+                if not label:
+                    label = role or "?"
                 results.append(
                     {
                         "element": element,
@@ -129,7 +160,7 @@ def _collect_elements(element, results, depth=0, max_depth=30, parent_clickable=
     if children:
         for child in children:
             _collect_elements(
-                child, results, depth + 1, max_depth,
+                child, results,
                 parent_clickable=clickable or parent_clickable,
             )
 
@@ -148,9 +179,34 @@ def get_elements(pid):
     return results
 
 
+def get_window_bounds(pid):
+    """Return (x, y, w, h) of the focused window for the given PID, or None."""
+    app_ref = AX.AXUIElementCreateApplication(pid)
+    focused = _get_attr(app_ref, "AXFocusedWindow")
+    if focused is None:
+        return None
+    pos = _get_attr(focused, "AXPosition")
+    size = _get_attr(focused, "AXSize")
+    if pos is None or size is None:
+        return None
+    _, p = AX.AXValueGetValue(pos, AX.kAXValueCGPointType, None)
+    _, s = AX.AXValueGetValue(size, AX.kAXValueCGSizeType, None)
+    return (p.x, p.y, s.width, s.height)
+
+
 def get_clickable_elements(pid):
-    """Get only clickable elements from the given PID."""
-    return [el for el in get_elements(pid) if el.get("clickable")]
+    """Get only clickable elements visible within the focused window."""
+    elements = [el for el in get_elements(pid) if el.get("clickable")]
+    bounds = get_window_bounds(pid)
+    if bounds is None:
+        return elements
+    wx, wy, ww, wh = bounds
+    visible = []
+    for el in elements:
+        _, pos = AX.AXValueGetValue(el["position"], AX.kAXValueCGPointType, None)
+        if wx <= pos.x < wx + ww and wy <= pos.y < wy + wh:
+            visible.append(el)
+    return visible
 
 
 def search(query, elements):

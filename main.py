@@ -6,12 +6,20 @@ from AppKit import (
     NSApp,
     NSMenu,
     NSMenuItem,
+    NSOffState,
+    NSOnState,
     NSStatusBar,
     NSVariableStatusItemLength,
 )
 from Foundation import NSObject
 from PyObjCTools import AppHelper
 import objc
+
+objc.loadBundle(
+    "ServiceManagement",
+    globals(),
+    "/System/Library/Frameworks/ServiceManagement.framework",
+)
 
 import config
 import hotkey
@@ -39,6 +47,13 @@ class StatusBarController(NSObject):
         settings_item.setTarget_(self)
         menu.addItem_(settings_item)
 
+        self._login_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Launch at Login", b"toggleLaunchAtLogin:", ""
+        )
+        self._login_item.setTarget_(self)
+        self._updateLoginItemState()
+        menu.addItem_(self._login_item)
+
         menu.addItem_(NSMenuItem.separatorItem())
 
         quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
@@ -53,6 +68,19 @@ class StatusBarController(NSObject):
     @objc.typedSelector(b"v@:@")
     def openSettings_(self, sender):
         self._settings_ctrl.showWindow()
+
+    @objc.typedSelector(b"v@:@")
+    def toggleLaunchAtLogin_(self, sender):
+        svc = SMAppService.mainAppService()  # noqa: F821
+        if svc.status() == 1:  # enabled
+            svc.unregisterAndReturnError_(None)
+        else:
+            svc.registerAndReturnError_(None)
+        self._updateLoginItemState()
+
+    def _updateLoginItemState(self):
+        enabled = SMAppService.mainAppService().status() == 1  # noqa: F821
+        self._login_item.setState_(NSOnState if enabled else NSOffState)
 
     @objc.typedSelector(b"v@:@")
     def quit_(self, sender):
