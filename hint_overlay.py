@@ -220,6 +220,7 @@ class HintOverlay:
         self._ws_observer = None
         self._clicking = False
         self._hints_visible = True
+        self._hints_gen = 0
         self._win_hint_cache = {}  # kCGWindowNumber -> hint char
         self._mouse_dir = None
         self._mouse_repeat_count = 0
@@ -591,13 +592,19 @@ class HintOverlay:
         self._hints_visible = True
 
     def toggle_hints(self):
-        """Toggle hint labels on/off. Recalculates when showing."""
-        log.info("toggle_hints: visible=%s", not self._hints_visible)
-        if self._hints_visible:
-            self._hide_all_labels()
-            self._hints_visible = False
-        else:
-            self.refresh()
+        """Show hints temporarily for 2 seconds."""
+        log.info("toggle_hints")
+        self.refresh()
+        self._hints_gen += 1
+        gen = self._hints_gen
+        AppHelper.callLater(2.0, lambda: self._auto_hide_hints(gen))
+
+    def _auto_hide_hints(self, gen):
+        """Hide hints if no new toggle happened since gen."""
+        if gen != self._hints_gen or not self.window:
+            return
+        self._hide_all_labels()
+        self._hints_visible = False
 
     # -- Insert mode --
 
