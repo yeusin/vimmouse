@@ -1,5 +1,6 @@
 """Vimium-style hint overlay for clicking UI elements."""
 
+import math
 import os
 import objc
 import Quartz
@@ -66,9 +67,9 @@ _KEY_SLASH = 44
 _KEY_SPACE = 49
 _KEY_I = 34
 _KEY_W = 13
-_MOUSE_STEP_MIN = 6
-_MOUSE_STEP_MAX = 60
-_MOUSE_ACCEL = 1.2  # multiplier per repeated move
+_MOUSE_S0 = 6        # base sensitivity (pixels per step)
+_MOUSE_STEP_MAX = 60  # cap on maximum step size
+_MOUSE_ACCEL_K = 0.04  # acceleration constant for S(f) = S0 * e^(k*f)
 _CTRL_FLAG = 1 << 18  # NSEventModifierFlagControl
 
 
@@ -204,7 +205,7 @@ class HintOverlay:
         self._hints_visible = True
         self._win_hint_cache = {}  # kCGWindowNumber -> hint char
         self._mouse_dir = None
-        self._mouse_speed = _MOUSE_STEP_MIN
+        self._mouse_repeat_count = 0
         self._insert_mode = False
         self._insert_tap = None
         self._insert_source = None
@@ -458,14 +459,17 @@ class HintOverlay:
     # -- Mouse movement --
 
     def move_mouse(self, dx, dy, repeat=False):
-        """Move the mouse cursor with acceleration on repeated presses."""
+        """Move the mouse cursor with exponential acceleration: S(f) = S0 * e^(k*f)."""
         direction = (dx, dy)
         if repeat and self._mouse_dir == direction:
-            self._mouse_speed = min(self._mouse_speed * _MOUSE_ACCEL, _MOUSE_STEP_MAX)
+            self._mouse_repeat_count += 1
         else:
-            self._mouse_speed = _MOUSE_STEP_MIN
+            self._mouse_repeat_count = 0
         self._mouse_dir = direction
-        step = int(self._mouse_speed)
+        step = min(
+            int(_MOUSE_S0 * math.exp(_MOUSE_ACCEL_K * self._mouse_repeat_count)),
+            _MOUSE_STEP_MAX,
+        )
         x, y = mouse.get_cursor_position()
         mouse.move_cursor(x + dx * step, y + dy * step)
 
