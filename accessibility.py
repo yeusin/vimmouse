@@ -1,7 +1,6 @@
 """AX tree querying and element matching."""
 
 import ApplicationServices as AX
-from AppKit import NSWorkspace
 
 # Semantic keyword → (AXRole, AXSubrole) or custom matcher
 SEMANTIC_MAP = {
@@ -86,6 +85,25 @@ def _is_interactive(role, element):
     return False
 
 
+def _build_label(element, role):
+    """Assemble a display label from an element's attributes."""
+    title = _get_attr(element, "AXTitle") or ""
+    desc = _get_attr(element, "AXDescription") or ""
+    value = _get_attr(element, "AXValue")
+    value_str = str(value) if value is not None else ""
+    subrole = _get_attr(element, "AXSubrole") or ""
+    help_text = _get_attr(element, "AXHelp") or ""
+    label = title or desc or value_str or help_text or subrole or ""
+    return label, title, desc, value_str, subrole
+
+
+def _element_rect(position, size):
+    """Unpack AXValue position/size into (x, y, w, h)."""
+    _, p = AX.AXValueGetValue(position, AX.kAXValueCGPointType, None)
+    _, s = AX.AXValueGetValue(size, AX.kAXValueCGSizeType, None)
+    return (p.x, p.y, s.width, s.height)
+
+
 def _child_text(element, max_depth=3):
     """Gather visible text from children (for labeling clickable containers)."""
     if max_depth <= 0:
@@ -127,13 +145,7 @@ def _collect_elements(root, results, parent_clickable=False):
             position = _get_attr(element, "AXPosition")
             size = _get_attr(element, "AXSize")
             if position is not None and size is not None:
-                title = _get_attr(element, "AXTitle") or ""
-                desc = _get_attr(element, "AXDescription") or ""
-                value = _get_attr(element, "AXValue")
-                value_str = str(value) if value is not None else ""
-                subrole = _get_attr(element, "AXSubrole") or ""
-                help_text = _get_attr(element, "AXHelp") or ""
-                label = title or desc or value_str or help_text or subrole or ""
+                label, title, desc, value_str, subrole = _build_label(element, role)
                 clickable = _is_clickable(role, element)
                 # For clickable elements with no label, try to get text from children
                 if not label and clickable:
@@ -166,12 +178,6 @@ def _collect_elements(root, results, parent_clickable=False):
             # Reverse so we process children in original order (stack is LIFO)
             for child in reversed(children):
                 stack.append((child, child_click))
-
-
-def get_frontmost_pid():
-    """Return the PID of the frontmost application."""
-    app = NSWorkspace.sharedWorkspace().frontmostApplication()
-    return app.processIdentifier()
 
 
 def get_elements(pid):
@@ -218,9 +224,7 @@ def _get_visible_bounds(pid):
     size = _get_attr(target, "AXSize")
     if pos is None or size is None:
         return None
-    _, p = AX.AXValueGetValue(pos, AX.kAXValueCGPointType, None)
-    _, s = AX.AXValueGetValue(size, AX.kAXValueCGSizeType, None)
-    return (p.x, p.y, s.width, s.height)
+    return _element_rect(pos, size)
 
 
 def _collect_clickable(root):
@@ -246,13 +250,7 @@ def _enrich_element(el):
     """Fetch full label info for a verified visible element."""
     element = el["element"]
     role = el["role"]
-    title = _get_attr(element, "AXTitle") or ""
-    desc = _get_attr(element, "AXDescription") or ""
-    value = _get_attr(element, "AXValue")
-    value_str = str(value) if value is not None else ""
-    subrole = _get_attr(element, "AXSubrole") or ""
-    help_text = _get_attr(element, "AXHelp") or ""
-    label = title or desc or value_str or help_text or subrole or ""
+    label, title, desc, value_str, subrole = _build_label(element, role)
     if not label:
         label = _child_text(element)
     if not label:
@@ -274,16 +272,15 @@ def get_clickable_elements(pid):
 
     visible = []
     for el in candidates:
-        _, pos = AX.AXValueGetValue(el["position"], AX.kAXValueCGPointType, None)
-        _, sz = AX.AXValueGetValue(el["size"], AX.kAXValueCGSizeType, None)
-        if sz.width < 1 or sz.height < 1:
+        ex, ey, ew, eh = _element_rect(el["position"], el["size"])
+        if ew < 1 or eh < 1:
             continue
-        if not (pos.x + sz.width > bx and pos.x < bx + bw
-                and pos.y + sz.height > by and pos.y < by + bh):
+        if not (ex + ew > bx and ex < bx + bw
+                and ey + eh > by and ey < by + bh):
             continue
         # Hit-test at element center to verify it's actually on screen
-        cx = pos.x + sz.width / 2
-        cy = pos.y + sz.height / 2
+        cx = ex + ew / 2
+        cy = ey + eh / 2
         err, hit = AX.AXUIElementCopyElementAtPosition(app_ref, cx, cy, None)
         if err != 0 or hit is None:
             continue

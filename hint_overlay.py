@@ -156,6 +156,13 @@ class HintOverlay:
         self._ws_observer = None
         self._clicking = False
 
+    def _activate_overlay_window(self):
+        """Activate the overlay window so it captures keystrokes."""
+        app = NSApplication.sharedApplication()
+        app.setActivationPolicy_(1)  # Accessory — enables key window
+        self.window.makeKeyAndOrderFront_(None)
+        app.activateIgnoringOtherApps_(True)
+
     def show(self):
         """Show hint overlay on clickable elements of the frontmost app."""
         my_pid = os.getpid()
@@ -176,11 +183,7 @@ class HintOverlay:
 
         self.window = HintWindow.alloc().initWithOverlay_(self)
         self._populate(elements)
-
-        app = NSApplication.sharedApplication()
-        app.setActivationPolicy_(1)  # Accessory — enables key window
-        self.window.makeKeyAndOrderFront_(None)
-        app.activateIgnoringOtherApps_(True)
+        self._activate_overlay_window()
 
         # Watch for target app gaining focus (alt-tab, mouse click, etc.)
         self._start_watching_focus()
@@ -233,10 +236,7 @@ class HintOverlay:
         elements = accessibility.get_clickable_elements(self._pid)
         if elements:
             self._populate(elements)
-        app = NSApplication.sharedApplication()
-        app.setActivationPolicy_(1)
-        self.window.makeKeyAndOrderFront_(None)
-        app.activateIgnoringOtherApps_(True)
+        self._activate_overlay_window()
 
     def _populate(self, elements):
         """Place hint labels on the overlay for the given elements."""
@@ -253,42 +253,44 @@ class HintOverlay:
 
         for hint, el in zip(hints, elements):
             x, y = _element_position(el)
-            # Convert from top-left screen coords to bottom-left (AppKit)
             flipped_y = screen.size.height - y
-
-            label = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 0, 0))
-            label.setStringValue_(hint)
-            label.setEditable_(False)
-            label.setSelectable_(False)
-            label.setBezeled_(False)
-            label.setDrawsBackground_(True)
-            label.setBackgroundColor_(
-                NSColor.colorWithCalibratedRed_green_blue_alpha_(*HINT_BG_COLOR)
-            )
-            label.setTextColor_(
-                NSColor.colorWithCalibratedRed_green_blue_alpha_(*HINT_TEXT_COLOR)
-            )
-            label.setFont_(NSFont.boldSystemFontOfSize_(HINT_FONT_SIZE))
-            label.sizeToFit()
-
-            frame = label.frame()
-            label.setFrame_(
-                NSMakeRect(
-                    x - HINT_PADDING,
-                    flipped_y - frame.size.height,
-                    frame.size.width + HINT_PADDING * 2,
-                    frame.size.height,
-                )
-            )
-            label.setWantsLayer_(True)
-            label.layer().setCornerRadius_(3)
-            label.layer().setBorderWidth_(0.5)
-            label.layer().setBorderColor_(
-                NSColor.colorWithWhite_alpha_(0.0, 0.3).CGColor()
-            )
-
+            label = self._create_hint_label(hint, x, flipped_y)
             content.addSubview_(label)
             self.labels.append((hint, label, el))
+
+    def _create_hint_label(self, hint_text, x, flipped_y):
+        """Create a styled hint label at the given screen position."""
+        label = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 0, 0))
+        label.setStringValue_(hint_text)
+        label.setEditable_(False)
+        label.setSelectable_(False)
+        label.setBezeled_(False)
+        label.setDrawsBackground_(True)
+        label.setBackgroundColor_(
+            NSColor.colorWithCalibratedRed_green_blue_alpha_(*HINT_BG_COLOR)
+        )
+        label.setTextColor_(
+            NSColor.colorWithCalibratedRed_green_blue_alpha_(*HINT_TEXT_COLOR)
+        )
+        label.setFont_(NSFont.boldSystemFontOfSize_(HINT_FONT_SIZE))
+        label.sizeToFit()
+
+        frame = label.frame()
+        label.setFrame_(
+            NSMakeRect(
+                x - HINT_PADDING,
+                flipped_y - frame.size.height,
+                frame.size.width + HINT_PADDING * 2,
+                frame.size.height,
+            )
+        )
+        label.setWantsLayer_(True)
+        label.layer().setCornerRadius_(3)
+        label.layer().setBorderWidth_(0.5)
+        label.layer().setBorderColor_(
+            NSColor.colorWithWhite_alpha_(0.0, 0.3).CGColor()
+        )
+        return label
 
     def move_mouse(self, dx, dy):
         """Move the mouse cursor by (dx, dy) pixels."""
@@ -352,10 +354,7 @@ class HintOverlay:
             self._prev_app = front
             self._pid = front.processIdentifier()
         self.refresh()
-        app = NSApplication.sharedApplication()
-        app.setActivationPolicy_(1)
-        self.window.makeKeyAndOrderFront_(None)
-        app.activateIgnoringOtherApps_(True)
+        self._activate_overlay_window()
 
     def refresh(self):
         """Re-collect elements and refresh hints."""
