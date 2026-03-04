@@ -8,6 +8,13 @@ from ApplicationServices import (
 )
 
 
+def get_cursor_position():
+    """Return the current cursor position as (x, y)."""
+    event = Quartz.CGEventCreate(None)
+    point = Quartz.CGEventGetLocation(event)
+    return point.x, point.y
+
+
 def move_cursor(x, y):
     """Move the mouse cursor to (x, y) using a synthetic mouse move event."""
     point = Quartz.CGPointMake(x, y)

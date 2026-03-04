@@ -26,7 +26,7 @@ HINT_TEXT_COLOR = (0.0, 0.0, 0.0, 1.0)  # black
 HINT_PADDING = 2
 
 
-_HINT_CHARS = "ABCDEFGHILMNOPQRSTUVWXYZ"  # excludes J, K (used for scrolling)
+_HINT_CHARS = "ABCDEFGIMNOPQRSTUVWXYZ"  # excludes H, J, K, L (used for movement)
 
 # macOS hardware key codes → Latin letters (input-source-independent)
 _KEYCODE_TO_CHAR = {
@@ -40,6 +40,16 @@ _KEYCODE_TO_CHAR = {
 }
 _KEY_ESCAPE = 53
 _KEY_BACKSPACE = 51
+_KEY_H = 4
+_KEY_J = 38
+_KEY_K = 40
+_KEY_L = 37
+_KEY_B = 11
+_KEY_F = 3
+_KEY_SLASH = 44
+_KEY_SPACE = 49
+_MOUSE_STEP = 20
+_CTRL_FLAG = 1 << 18  # NSEventModifierFlagControl
 
 
 def _generate_hints(count):
@@ -93,14 +103,28 @@ class HintWindow(NSWindow):
 
     def keyDown_(self, event):
         code = event.keyCode()
+        flags = event.modifierFlags()
+        ctrl = flags & _CTRL_FLAG
         if code == _KEY_ESCAPE:
             self.overlay.dismiss()
         elif code == _KEY_BACKSPACE:
             self.overlay.backspace()
-        elif code == 38:  # j
-            self.overlay.scroll(-3)
-        elif code == 40:  # k
+        elif ctrl and code == _KEY_B:
             self.overlay.scroll(3)
+        elif ctrl and code == _KEY_F:
+            self.overlay.scroll(-3)
+        elif code == _KEY_H:
+            self.overlay.move_mouse(-_MOUSE_STEP, 0)
+        elif code == _KEY_J:
+            self.overlay.move_mouse(0, _MOUSE_STEP)
+        elif code == _KEY_K:
+            self.overlay.move_mouse(0, -_MOUSE_STEP)
+        elif code == _KEY_L:
+            self.overlay.move_mouse(_MOUSE_STEP, 0)
+        elif code == _KEY_SPACE:
+            self.overlay.click_at_cursor()
+        elif code == _KEY_SLASH:
+            self.overlay.refresh()
         elif code in _KEYCODE_TO_CHAR and _KEYCODE_TO_CHAR[code].isalpha():
             self.overlay.type_char(_KEYCODE_TO_CHAR[code].upper())
 
@@ -207,6 +231,11 @@ class HintOverlay:
             content.addSubview_(label)
             self.labels.append((hint, label, el))
 
+    def move_mouse(self, dx, dy):
+        """Move the mouse cursor by (dx, dy) pixels."""
+        x, y = mouse.get_cursor_position()
+        mouse.move_cursor(x + dx, y + dy)
+
     def scroll(self, lines):
         """Scroll the target app. Hints hide during scrolling, refresh when idle."""
         mouse.scroll(lines)
@@ -227,6 +256,18 @@ class HintOverlay:
         self._scroll_pending = False
         elements = accessibility.get_clickable_elements(self._pid)
         self._populate(elements)
+
+    def click_at_cursor(self):
+        """Click at the current cursor position and dismiss."""
+        x, y = mouse.get_cursor_position()
+        self.dismiss()
+        AppHelper.callLater(0.15, mouse.click, x, y)
+
+    def refresh(self):
+        """Re-collect elements and refresh hints."""
+        elements = accessibility.get_clickable_elements(self._pid)
+        if elements:
+            self._populate(elements)
 
     def dismiss(self):
         """Dismiss the overlay without action."""
