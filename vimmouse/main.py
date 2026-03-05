@@ -29,10 +29,10 @@ objc.loadBundle(
     "/System/Library/Frameworks/ServiceManagement.framework",
 )
 
-import config
-import hotkey
-import hint_overlay
-from settings import SettingsController
+from . import config
+from . import hotkey
+from . import hint_overlay
+from .settings import SettingsController
 
 
 class StatusBarController(NSObject):

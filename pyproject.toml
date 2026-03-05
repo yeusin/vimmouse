@@ -17,10 +17,10 @@ dev = [
 ]
 
 [project.scripts]
-vimmouse = "main:main"
+vimmouse = "vimmouse.main:main"
 
 [tool.py2app]
-app = ["main.py"]
+app = ["vimmouse/main.py"]
 argv_emulation = false
 packages = [
     "objc",

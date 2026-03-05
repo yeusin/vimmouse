@@ -21,9 +21,9 @@ from AppKit import (
 )
 from PyObjCTools import AppHelper
 import ApplicationServices as AX
-import accessibility
-import config
-import mouse
+from . import accessibility
+from . import config
+from . import mouse
 
 log = logging.getLogger(__name__)
 

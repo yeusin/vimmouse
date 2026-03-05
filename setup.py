@@ -27,7 +27,7 @@ if os.path.exists("pyproject.toml"):
     atexit.register(lambda: os.rename("_pyproject.toml", "pyproject.toml") if os.path.exists("_pyproject.toml") else None)
 
 setup(
-    app=["main.py"],
+    app=["vimmouse/main.py"],
     options={
         "py2app": {
             "argv_emulation": False,

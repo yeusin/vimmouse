@@ -22,9 +22,9 @@ from AppKit import (
 )
 from Foundation import NSObject
 
-import config
-import hotkey
-from hotkey import MODIFIER_MASK
+from . import config
+from . import hotkey
+from .hotkey import MODIFIER_MASK
 
 # Map modifier flag bits to display symbols
 _MODIFIER_SYMBOLS = [
