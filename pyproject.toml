@@ -1,6 +1,6 @@
 [project]
 name = "vimmouse"
-version = "0.1.0"
+version = "0.0.0"
 description = "Vim-style UI element navigation for macOS"
 requires-python = ">=3.13"
 dependencies = [
@@ -37,7 +37,7 @@ packages = [
 [tool.py2app.plist]
 CFBundleName = "VimMouse"
 CFBundleIdentifier = "com.vimmouse.app"
-CFBundleVersion = "0.1.0"
-CFBundleShortVersionString = "0.1.0"
+CFBundleVersion = "0.0.0"
+CFBundleShortVersionString = "0.0.0"
 LSUIElement = true
 NSAccessibilityUsageDescription = "VimMouse needs Accessibility access to detect UI elements and simulate clicks."
