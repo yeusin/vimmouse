@@ -31,11 +31,11 @@ jobs:
 
       - name: Zip app for release
         if: startsWith(github.ref, 'refs/tags/v')
-        run: cd dist && zip -r VimMouse.app.zip VimMouse.app
+        run: cd dist && zip -r "VimMouse-${VIMMOUSE_VERSION}.app.zip" VimMouse.app
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/VimMouse.app.zip
+          files: dist/VimMouse-${{ env.VIMMOUSE_VERSION }}.app.zip
           generate_release_notes: true
