@@ -14,7 +14,6 @@ from AppKit import (
     NSWindow,
     NSMakeRect,
     NSBackingStoreBuffered,
-    NSApplication,
     NSFloatingWindowLevel,
     NSWorkspace,
     NSRunningApplication,
@@ -40,11 +39,6 @@ WIN_HINT_BG_COLOR = (0.15, 0.15, 0.15, 0.85)  # dark gray
 WIN_HINT_TEXT_COLOR = (1.0, 1.0, 1.0, 1.0)  # white
 WIN_HINT_PADDING = 12
 WIN_HINT_CORNER_RADIUS = 10
-
-# Target window highlight style
-_HIGHLIGHT_COLOR = (0.30, 0.55, 1.0, 1.0)  # blue
-_HIGHLIGHT_WIDTH = 3
-_HIGHLIGHT_CORNER = 20  # match macOS window corner radius
 
 # Watermark style
 _WM_VM_COLOR = (0.9, 0.70)  # white, alpha
@@ -142,32 +136,6 @@ class _RoundedBoxView(NSView):
         path.fill()
 
 
-class _HighlightBorderView(NSView):
-    """NSView that draws a glowing border around the target window."""
-
-    def initWithFrame_(self, frame):
-        self = objc.super(_HighlightBorderView, self).initWithFrame_(frame)
-        if self is None:
-            return None
-        self.setWantsLayer_(True)
-        layer = self.layer()
-        layer.setBorderWidth_(_HIGHLIGHT_WIDTH)
-        layer.setBorderColor_(
-            Quartz.CGColorCreateGenericRGB(*_HIGHLIGHT_COLOR)
-        )
-        layer.setCornerRadius_(_HIGHLIGHT_CORNER)
-        layer.setShadowColor_(
-            Quartz.CGColorCreateGenericRGB(0.30, 0.55, 1.0, 1.0)
-        )
-        layer.setShadowOpacity_(0.6)
-        layer.setShadowRadius_(8.0)
-        layer.setShadowOffset_(Quartz.CGSizeMake(0, 0))
-        layer.setBackgroundColor_(
-            Quartz.CGColorCreateGenericRGB(0, 0, 0, 0)
-        )
-        return self
-
-
 def _add_watermark(container, screen_size, mode_text):
     """Add VM + mode watermark labels in a rounded box. Returns (box, vm_label, mode_label)."""
     vm = _make_label("VM", _WM_VM_FONT_SIZE, None, _WM_VM_COLOR, draw_bg=False)
@@ -203,7 +171,7 @@ def _add_watermark(container, screen_size, mode_text):
 
 
 class HintWindow(NSWindow):
-    """Transparent full-screen window that captures keystrokes."""
+    """Transparent full-screen window for visual overlay (hints, border, watermark)."""
 
     def initWithOverlay_(self, overlay):
         screen = NSScreen.mainScreen().frame()
@@ -223,10 +191,6 @@ class HintWindow(NSWindow):
         self.setHasShadow_(False)
 
         self._screen_size = screen.size
-
-        self._highlight_view = _HighlightBorderView.alloc().initWithFrame_(NSMakeRect(0, 0, 0, 0))
-        self._highlight_view.setHidden_(True)
-        self.contentView().addSubview_(self._highlight_view)
 
         self._wm_box, self._vm_label, self._mode_label = _add_watermark(
             self.contentView(), screen.size, "NORMAL"
@@ -259,51 +223,7 @@ class HintWindow(NSWindow):
         AppHelper.callLater(_WM_FLASH_DURATION, _hide)
 
     def canBecomeKeyWindow(self):
-        return not self.overlay._insert_mode
-
-    def keyDown_(self, event):
-        code = event.keyCode()
-        flags = event.modifierFlags()
-        cmd = flags & (1 << 20)  # NSEventModifierFlagCommand
-        ctrl = bool(flags & _CTRL_FLAG)
-        # Pass Cmd+key combos through to the target app (Cmd+W, Cmd+Tab, Cmd+`, etc.)
-        if cmd and not ctrl:
-            self.overlay.passthrough_key(event)
-            return
-        if code == _KEY_ESCAPE:
-            return
-        if code == _KEY_BACKSPACE:
-            self.overlay.backspace()
-            return
-
-        shift = bool(flags & _SHIFT_FLAG)
-        action = self.overlay._binding_lookup.get((code, ctrl, shift))
-        if action == "move_left":
-            self.overlay.move_mouse(-1, 0, event.isARepeat())
-        elif action == "move_down":
-            self.overlay.move_mouse(0, 1, event.isARepeat())
-        elif action == "move_up":
-            self.overlay.move_mouse(0, -1, event.isARepeat())
-        elif action == "move_right":
-            self.overlay.move_mouse(1, 0, event.isARepeat())
-        elif action == "scroll_up":
-            self.overlay.scroll(3)
-        elif action == "scroll_down":
-            self.overlay.scroll(-3)
-        elif action == "back":
-            self.overlay.mouse_back()
-        elif action == "forward":
-            self.overlay.mouse_forward()
-        elif action == "click":
-            self.overlay.click_at_cursor()
-        elif action == "right_click":
-            self.overlay.right_click_at_cursor()
-        elif action == "insert_mode":
-            self.overlay.enter_insert_mode()
-        elif action == "toggle_hints":
-            self.overlay.toggle_hints()
-        elif code in _KEYCODE_TO_CHAR and _KEYCODE_TO_CHAR[code].isalpha():
-            self.overlay.type_char(_KEYCODE_TO_CHAR[code].upper())
+        return False
 
 
 class HintOverlay:
@@ -324,9 +244,9 @@ class HintOverlay:
         self._mouse_dir = None
         self._mouse_repeat_count = 0
         self._insert_mode = False
-        self._insert_tap = None
-        self._insert_source = None
         self._insert_window = None
+        self._normal_tap = None
+        self._normal_source = None
         self._menu_tap = None
         self._menu_source = None
         self.reload_keybindings()
@@ -344,13 +264,6 @@ class HintOverlay:
         if self._on_mode_change:
             self._on_mode_change(mode)
 
-    def _activate_overlay_window(self):
-        """Activate the overlay window so it captures keystrokes."""
-        app = NSApplication.sharedApplication()
-        app.setActivationPolicy_(1)  # Accessory — enables key window
-        self.window.makeKeyAndOrderFront_(None)
-        app.activateIgnoringOtherApps_(True)
-
     def _hide_all_labels(self):
         """Hide all hint labels."""
         for _, label, _, _ in self.labels:
@@ -363,91 +276,129 @@ class HintOverlay:
             self._prev_app = front
             self._pid = front.processIdentifier()
 
-    # -- Show / Dismiss --
+    # -- Global event tap for normal mode --
 
-    def toggle(self):
-        """Cycle: deactivated→activate, normal→deactivate, insert→normal."""
-        if not self.window:
-            self.show()
-        elif self._insert_mode:
+    def _install_normal_tap(self):
+        """Install a global event tap for normal mode key capture."""
+        if self._normal_tap:
+            return
+        tap = Quartz.CGEventTapCreate(
+            Quartz.kCGSessionEventTap,
+            Quartz.kCGHeadInsertEventTap,
+            Quartz.kCGEventTapOptionDefault,
+            Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown),
+            self._normal_tap_callback,
+            None,
+        )
+        if tap:
+            self._normal_tap = tap
+            self._normal_source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
+            Quartz.CFRunLoopAddSource(
+                Quartz.CFRunLoopGetCurrent(), self._normal_source, Quartz.kCFRunLoopCommonModes
+            )
+            Quartz.CGEventTapEnable(tap, True)
+
+    def _remove_normal_tap(self):
+        """Remove the normal mode event tap."""
+        if self._normal_tap:
+            Quartz.CGEventTapEnable(self._normal_tap, False)
+            if self._normal_source:
+                Quartz.CFRunLoopRemoveSource(
+                    Quartz.CFRunLoopGetCurrent(), self._normal_source, Quartz.kCFRunLoopCommonModes
+                )
+                self._normal_source = None
+            self._normal_tap = None
+
+    def _normal_tap_callback(self, proxy, event_type, event, refcon):
+        """Global tap that handles all normal-mode keys."""
+        if event_type == Quartz.kCGEventTapDisabledByTimeout:
+            if self._normal_tap:
+                Quartz.CGEventTapEnable(self._normal_tap, True)
+            return event
+
+        code = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
+        flags = Quartz.CGEventGetFlags(event)
+        cmd = flags & (1 << 20)  # NSEventModifierFlagCommand
+        ctrl = bool(flags & _CTRL_FLAG)
+
+        # Pass Cmd+key combos through to the target app
+        if cmd and not ctrl:
+            return event
+        # Pass Escape through
+        if code == _KEY_ESCAPE:
+            return event
+
+        if code == _KEY_BACKSPACE:
+            AppHelper.callAfter(self.backspace)
+            return None
+
+        shift = bool(flags & _SHIFT_FLAG)
+        action = self._binding_lookup.get((code, ctrl, shift))
+        repeat = bool(Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventAutorepeat))
+
+        if action == "move_left":
+            AppHelper.callAfter(lambda: self.move_mouse(-1, 0, repeat))
+            return None
+        elif action == "move_down":
+            AppHelper.callAfter(lambda: self.move_mouse(0, 1, repeat))
+            return None
+        elif action == "move_up":
+            AppHelper.callAfter(lambda: self.move_mouse(0, -1, repeat))
+            return None
+        elif action == "move_right":
+            AppHelper.callAfter(lambda: self.move_mouse(1, 0, repeat))
+            return None
+        elif action == "scroll_up":
+            AppHelper.callAfter(lambda: self.scroll(3))
+            return None
+        elif action == "scroll_down":
+            AppHelper.callAfter(lambda: self.scroll(-3))
+            return None
+        elif action == "back":
+            AppHelper.callAfter(self.mouse_back)
+            return None
+        elif action == "forward":
+            AppHelper.callAfter(self.mouse_forward)
+            return None
+        elif action == "click":
+            AppHelper.callAfter(self.click_at_cursor)
+            return None
+        elif action == "right_click":
+            AppHelper.callAfter(self.right_click_at_cursor)
+            return None
+        elif action == "insert_mode":
+            AppHelper.callAfter(self.enter_insert_mode)
+            return None
+        elif action == "toggle_hints":
+            AppHelper.callAfter(self.toggle_hints)
+            return None
+        elif code in _KEYCODE_TO_CHAR and _KEYCODE_TO_CHAR[code].isalpha():
+            char = _KEYCODE_TO_CHAR[code].upper()
+            AppHelper.callAfter(lambda c=char: self.type_char(c))
+            return None
+
+        return event
+
+    # -- Show / Normal mode --
+
+    def return_to_normal(self):
+        """Return to normal mode from insert mode (called by hotkey)."""
+        if self._insert_mode:
             AppHelper.callAfter(self._exit_insert_mode)
-        else:
-            self.dismiss()
 
     def show(self):
-        """Show hint overlay on clickable elements of the frontmost app."""
-        my_pid = os.getpid()
-        front = NSWorkspace.sharedWorkspace().frontmostApplication()
-        if front.processIdentifier() == my_pid:
-            return
-        self._prev_app = front
-        self._pid = self._prev_app.processIdentifier()
-        log.info("show: app=%s pid=%d", front.localizedName(), self._pid)
-        elements = accessibility.get_clickable_elements(self._pid)
-
-        if not elements:
-            log.info("show: no clickable elements found")
-            return
-
-        self._center_cursor_on_app()
+        """Activate the overlay: create window, install tap, start watching focus."""
+        self._update_target_app()
+        if self._pid:
+            log.info("show: pid=%d", self._pid)
         self.window = HintWindow.alloc().initWithOverlay_(self)
-        self._populate(elements)
-        self._hide_all_labels()
-        self._activate_overlay_window()
+        self.window.orderFrontRegardless()
+        self._install_normal_tap()
         self._start_watching_focus()
-        self._update_border()
         self.window._flash_watermark()
         self._notify_mode("N")
 
-    def dismiss(self):
-        """Dismiss the overlay without action."""
-        log.info("dismiss")
-        if self._insert_mode:
-            self._exit_insert_mode()
-        self._remove_menu_tap()
-        self._hide_insert_watermark()
-        if self.window:
-            self.window._highlight_view.setHidden_(True)
-        self._stop_watching_focus()
-        if self.window:
-            self.window.orderOut_(None)
-            self.window = None
-        self.labels = []
-        self.typed = ""
-        self._win_hint_cache = {}
-        NSApplication.sharedApplication().setActivationPolicy_(2)  # Prohibited
-        if self._prev_app:
-            self._prev_app.activateWithOptions_(0)
-            self._prev_app = None
-        self._notify_mode(None)
-
     # -- Cursor --
-
-    def _update_border(self):
-        """Position the title bar highlight over the target app's focused window."""
-        if not self.window or not self._pid:
-            return
-        app_ref = AX.AXUIElementCreateApplication(self._pid)
-        err, focused = AX.AXUIElementCopyAttributeValue(app_ref, "AXFocusedWindow", None)
-        if err != 0 or focused is None:
-            self.window._highlight_view.setHidden_(True)
-            return
-        err, pos = AX.AXUIElementCopyAttributeValue(focused, "AXPosition", None)
-        _, size = AX.AXUIElementCopyAttributeValue(focused, "AXSize", None)
-        if pos is None or size is None:
-            self.window._highlight_view.setHidden_(True)
-            return
-        _, p = AX.AXValueGetValue(pos, AX.kAXValueCGPointType, None)
-        _, s = AX.AXValueGetValue(size, AX.kAXValueCGSizeType, None)
-        screen_h = NSScreen.mainScreen().frame().size.height
-        flipped_y = screen_h - p.y - s.height
-        pad = _HIGHLIGHT_WIDTH + 1
-        self.window._highlight_view.setFrame_(NSMakeRect(
-            p.x - pad, flipped_y - pad,
-            s.width + pad * 2, s.height + pad * 2,
-        ))
-        self.window._highlight_view.setHidden_(False)
-        self.window._highlight_view.setNeedsDisplay_(True)
 
     def _center_cursor_on_app(self):
         """Move the cursor to the center of the focused window of the target app."""
@@ -496,8 +447,6 @@ class HintOverlay:
             elements = accessibility.get_clickable_elements(self._pid)
             if elements:
                 self._populate(elements)
-        self._activate_overlay_window()
-        self._update_border()
 
     # -- Hint population --
 
@@ -667,28 +616,6 @@ class HintOverlay:
             elements = accessibility.get_clickable_elements(self._pid)
             self._populate(elements)
 
-    # -- Key passthrough --
-
-    def passthrough_key(self, event):
-        """Forward a key event to the target app by briefly activating it."""
-        cg_event = event.CGEvent()
-        if not cg_event or not self._prev_app:
-            return
-        # Hide overlay so target app can receive focus and process the key
-        char = _KEYCODE_TO_CHAR.get(Quartz.CGEventGetIntegerValueField(cg_event, Quartz.kCGKeyboardEventKeycode), "?")
-        log.info("passthrough: key=%s", char)
-        self._clicking = True
-        if self.window:
-            self.window.orderOut_(None)
-        self._prev_app.activateWithOptions_(0)
-        # Post both keydown and keyup
-        Quartz.CGEventPost(Quartz.kCGSessionEventTap, cg_event)
-        keyup = Quartz.CGEventCreateCopy(cg_event)
-        Quartz.CGEventSetType(keyup, Quartz.kCGEventKeyUp)
-        Quartz.CGEventPost(Quartz.kCGSessionEventTap, keyup)
-        # Reclaim overlay after a short delay to let the app process the key
-        AppHelper.callLater(0.1, self._reclaim_and_refresh)
-
     # -- Clicking --
 
     def mouse_back(self):
@@ -715,20 +642,17 @@ class HintOverlay:
         """Hide hints, click at (x, y) in the target app, then refresh hints."""
         self._clicking = True
         self._hide_all_labels()
-        if self._prev_app:
-            self._prev_app.activateWithOptions_(0)
-        self._perform_click_and_refresh(x, y)
+        mouse.click(x, y)
+        self._clicking = False
+        self._update_target_app()
+        if self._hints_visible:
+            self.refresh()
 
     def _right_click_and_refresh(self, x, y):
         """Right-click and enter menu mode with a global tap for mouse movement."""
         self._clicking = True
         self._hide_all_labels()
-        if self._prev_app:
-            self._prev_app.activateWithOptions_(0)
-        if not self.window:
-            return
-        self.window.orderOut_(None)
-        NSApplication.sharedApplication().setActivationPolicy_(2)
+        self._remove_normal_tap()
         mouse.right_click(x, y)
         self._clicking = False
         self._install_menu_tap()
@@ -802,29 +726,9 @@ class HintOverlay:
         self._remove_menu_tap()
         if self.window:
             self._update_target_app()
-            self._activate_overlay_window()
-            self._update_border()
+            self._install_normal_tap()
             if self._hints_visible:
                 self.refresh()
-
-    def _perform_click_and_refresh(self, x, y):
-        """Execute the click and refresh hints afterward."""
-        if not self.window:
-            return
-        self.window.orderOut_(None)
-        mouse.click(x, y)
-        self._reclaim_and_refresh()
-
-    def _reclaim_and_refresh(self):
-        """Reclaim key window and refresh hints after a click."""
-        self._clicking = False
-        if not self.window:
-            return
-        self._update_target_app()
-        self._activate_overlay_window()
-        self._update_border()
-        if self._hints_visible:
-            self.refresh()
 
     # -- Refresh / Toggle --
 
@@ -857,46 +761,15 @@ class HintOverlay:
     # -- Insert mode --
 
     def enter_insert_mode(self):
-        """Enter insert mode: pass all keys to the target app until Escape."""
+        """Enter insert mode: pass all keys to the target app until hotkey toggle."""
         if self._insert_mode:
             return
         log.info("mode: INSERT")
         self._insert_mode = True
         self._notify_mode("I")
+        self._remove_normal_tap()
 
-        if self.window:
-            self.window._highlight_view.setHidden_(True)
-            self.window.orderOut_(None)
         self._show_insert_watermark()
-
-        NSApplication.sharedApplication().setActivationPolicy_(2)  # Prohibited
-        if self._prev_app:
-            self._prev_app.activateWithOptions_(0)
-
-        # Install a global tap to catch Escape
-        tap = Quartz.CGEventTapCreate(
-            Quartz.kCGSessionEventTap,
-            Quartz.kCGHeadInsertEventTap,
-            Quartz.kCGEventTapOptionDefault,
-            Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown),
-            self._insert_tap_callback,
-            None,
-        )
-        if tap:
-            self._insert_tap = tap
-            self._insert_source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
-            Quartz.CFRunLoopAddSource(
-                Quartz.CFRunLoopGetCurrent(), self._insert_source, Quartz.kCFRunLoopCommonModes
-            )
-            Quartz.CGEventTapEnable(tap, True)
-
-    def _insert_tap_callback(self, proxy, event_type, event, refcon):
-        """Global tap callback that catches Escape to exit insert mode."""
-        if event_type == Quartz.kCGEventTapDisabledByTimeout:
-            if self._insert_tap:
-                Quartz.CGEventTapEnable(self._insert_tap, True)
-            return event
-        return event
 
     def _exit_insert_mode(self):
         """Exit insert mode and restore the overlay."""
@@ -904,23 +777,13 @@ class HintOverlay:
         self._insert_mode = False
         self._notify_mode("N")
 
-        if self._insert_tap:
-            Quartz.CGEventTapEnable(self._insert_tap, False)
-            if self._insert_source:
-                Quartz.CFRunLoopRemoveSource(
-                    Quartz.CFRunLoopGetCurrent(), self._insert_source, Quartz.kCFRunLoopCommonModes
-                )
-                self._insert_source = None
-            self._insert_tap = None
-
         if not self.window:
             return
 
         self._update_target_app()
         self._hide_insert_watermark()
         self.window._set_mode("NORMAL")
-        self._activate_overlay_window()
-        self._update_border()
+        self._install_normal_tap()
         self._hide_all_labels()
         self._hints_visible = False
 
@@ -993,11 +856,9 @@ class HintOverlay:
                 return
 
     def _activate_and_refresh(self):
-        """Re-activate overlay and refresh element hints after window switch."""
+        """Refresh element hints after window switch."""
         if not self.window:
             return
-        self._activate_overlay_window()
-        self._update_border()
         self.refresh()
 
     # -- Hint typing --
