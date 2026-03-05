@@ -46,6 +46,8 @@ ALWAYS_CLICKABLE = {
     "AXRadioButton",
     "AXPopUpButton",
     "AXComboBox",
+    "AXTextField",
+    "AXTextArea",
     "AXTab",
     "AXDisclosureTriangle",
     "AXIncrementor",

@@ -733,6 +733,7 @@ class HintOverlay:
             return
         self._hide_all_labels()
         self._hints_visible = False
+        self.typed = ""
 
     # -- Insert mode --
 
@@ -882,6 +883,12 @@ class HintOverlay:
 
     # -- Hint typing --
 
+    def _reset_hints_timer(self):
+        """Reset the 2-second auto-hide timer for hints."""
+        self._hints_gen += 1
+        gen = self._hints_gen
+        AppHelper.callLater(2.0, lambda: self._auto_hide_hints(gen))
+
     def type_char(self, char):
         """Handle a typed letter: filter hints, click if unique match."""
         self.typed += char
@@ -905,6 +912,9 @@ class HintOverlay:
             self.typed = ""
             for _, label, _, _ in self.labels:
                 label.setHidden_(False)
+            self._reset_hints_timer()
+        else:
+            self._reset_hints_timer()
 
     def backspace(self):
         """Remove last typed char and re-show matching hints."""
@@ -916,3 +926,4 @@ class HintOverlay:
                 label.setHidden_(False)
             else:
                 label.setHidden_(True)
+        self._reset_hints_timer()
