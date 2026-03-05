@@ -242,6 +242,9 @@ class HintOverlay:
         self._normal_source = None
         self._menu_tap = None
         self._menu_source = None
+        self._cycle_windows = None
+        self._cycle_idx = -1
+        self._cycle_gen = 0
         self.reload_keybindings()
 
     def reload_keybindings(self):
@@ -364,6 +367,9 @@ class HintOverlay:
         elif action == "toggle_hints":
             AppHelper.callAfter(self.toggle_hints)
             return None
+        elif action == "cycle_window":
+            AppHelper.callAfter(self.cycle_window)
+            return None
         elif code in _KEYCODE_TO_CHAR and _KEYCODE_TO_CHAR[code].isalpha():
             char = _KEYCODE_TO_CHAR[code].upper()
             AppHelper.callAfter(lambda c=char: self.type_char(c))
@@ -405,6 +411,8 @@ class HintOverlay:
     def _on_app_activated(self, note):
         """Called when any app gains focus. Refresh hints for the newly focused app."""
         if not self.window or self._clicking or self._insert_mode:
+            return
+        if self._cycle_windows is not None:
             return
         activated = note.userInfo()["NSWorkspaceApplicationKey"]
         activated_pid = activated.processIdentifier()
@@ -788,6 +796,48 @@ class HintOverlay:
 
     # -- Window switching --
 
+    def cycle_window(self):
+        """Cycle focus to the next visible window."""
+        if self._cycle_windows is None:
+            self._cycle_windows = self._get_visible_windows()
+            self._cycle_idx = -1
+            log.info("cycle_window: snapshot %d windows:", len(self._cycle_windows))
+            for i, w in enumerate(self._cycle_windows):
+                b = w.get(Quartz.kCGWindowBounds, {})
+                log.info("  [%d] pid=%s owner=%s wid=%s bounds=(%s,%s,%s,%s)",
+                         i, w.get(Quartz.kCGWindowOwnerPID),
+                         w.get(Quartz.kCGWindowOwnerName, "?"),
+                         w.get(Quartz.kCGWindowNumber, "?"),
+                         b.get("X"), b.get("Y"), b.get("Width"), b.get("Height"))
+        if not self._cycle_windows:
+            log.info("cycle_window: no windows to cycle")
+            return
+        self._cycle_idx = (self._cycle_idx + 1) % len(self._cycle_windows)
+        win_info = self._cycle_windows[self._cycle_idx]
+        log.info("cycle_window: idx=%d/%d -> pid=%s owner=%s wid=%s",
+                 self._cycle_idx, len(self._cycle_windows),
+                 win_info.get(Quartz.kCGWindowOwnerPID),
+                 win_info.get(Quartz.kCGWindowOwnerName, "?"),
+                 win_info.get(Quartz.kCGWindowNumber, "?"))
+        pid = win_info[Quartz.kCGWindowOwnerPID]
+        app = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+        if app:
+            app.activateWithOptions_(0)
+            self._pid = pid
+        bounds = win_info[Quartz.kCGWindowBounds]
+        self._raise_window(pid, bounds)
+        mouse.move_cursor(bounds["X"] + bounds["Width"] / 2,
+                          bounds["Y"] + bounds["Height"] / 2)
+        # Clear snapshot after 2s of no cycling
+        self._cycle_gen += 1
+        gen = self._cycle_gen
+        AppHelper.callLater(5.0, lambda: self._clear_cycle(gen))
+
+    def _clear_cycle(self, gen):
+        if gen == self._cycle_gen:
+            log.info("cycle_window: snapshot cleared (timeout)")
+            self._cycle_windows = None
+
     def _switch_to_window(self, win_info):
         """Activate the app owning the given window and raise it."""
         log.info("switch: window=%s", win_info.get(Quartz.kCGWindowOwnerName, "?"))
@@ -809,19 +859,26 @@ class HintOverlay:
         app_ref = AX.AXUIElementCreateApplication(pid)
         err, windows = AX.AXUIElementCopyAttributeValue(app_ref, "AXWindows", None)
         if err != 0 or not windows:
+            log.info("_raise_window: no AXWindows for pid=%s (err=%s)", pid, err)
             return
         tx, ty = bounds["X"], bounds["Y"]
         tw, th = bounds["Width"], bounds["Height"]
-        for win in windows:
+        log.info("_raise_window: looking for (%.0f,%.0f,%.0f,%.0f) among %d AXWindows",
+                 tx, ty, tw, th, len(windows))
+        for i, win in enumerate(windows):
             err, pos = AX.AXUIElementCopyAttributeValue(win, "AXPosition", None)
             _, size = AX.AXUIElementCopyAttributeValue(win, "AXSize", None)
             if pos is None or size is None:
+                log.info("  [%d] skipped (no pos/size)", i)
                 continue
             _, p = AX.AXValueGetValue(pos, AX.kAXValueCGPointType, None)
             _, s = AX.AXValueGetValue(size, AX.kAXValueCGSizeType, None)
+            log.info("  [%d] pos=(%.0f,%.0f) size=(%.0f,%.0f)", i, p.x, p.y, s.width, s.height)
             if abs(p.x - tx) < 2 and abs(p.y - ty) < 2 and abs(s.width - tw) < 2 and abs(s.height - th) < 2:
                 AX.AXUIElementPerformAction(win, "AXRaise")
+                log.info("  [%d] MATCHED — raised", i)
                 return
+        log.info("_raise_window: no match found")
 
     # -- Hint typing --
 

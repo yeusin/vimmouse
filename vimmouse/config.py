@@ -25,6 +25,7 @@ _DEFAULT_KEYBINDINGS = {
     "forward": {"keycode": 13},            # w
     "back": {"keycode": 11},               # b
     "right_click": {"keycode": 49, "shift": True},  # shift+space
+    "cycle_window": {"keycode": 13, "ctrl": True},  # ctrl+w
 }
 
 
