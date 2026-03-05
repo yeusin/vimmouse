@@ -6,10 +6,12 @@ import time
 import objc
 import Quartz
 from AppKit import (
+    NSBezierPath,
     NSScreen,
     NSColor,
     NSFont,
     NSTextField,
+    NSView,
     NSWindow,
     NSMakeRect,
     NSBackingStoreBuffered,
@@ -41,10 +43,15 @@ WIN_HINT_PADDING = 12
 WIN_HINT_CORNER_RADIUS = 10
 
 # Watermark style
-_WM_VM_COLOR = (0.5, 0.30)  # white, alpha
+_WM_VM_COLOR = (0.9, 0.70)  # white, alpha
 _WM_VM_FONT_SIZE = 48
-_WM_MODE_COLOR = (0.5, 0.25)
+_WM_MODE_COLOR = (0.9, 0.60)
 _WM_MODE_FONT_SIZE = 16
+_WM_FLASH_DURATION = 2.0  # seconds to show watermark
+_WM_BOX_BG = (0.0, 0.0, 0.0, 0.50)  # black, semi-transparent
+_WM_BOX_CORNER = 14
+_WM_BOX_PAD_X = 24
+_WM_BOX_PAD_Y = 16
 
 
 # macOS hardware key codes → Latin letters (input-source-independent)
@@ -120,23 +127,49 @@ def _make_label(text, font_size, bg_color, text_color, draw_bg=True, bold=True):
     return label
 
 
-def _add_watermark(container, screen_size, mode_text):
-    """Add VM + mode watermark labels to a container view. Returns (vm_label, mode_label)."""
-    cx, cy = screen_size.width / 2, screen_size.height / 2
+class _RoundedBoxView(NSView):
+    """NSView that draws a rounded semi-transparent rectangle."""
 
+    def drawRect_(self, rect):
+        NSColor.colorWithCalibratedRed_green_blue_alpha_(*_WM_BOX_BG).set()
+        path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
+            self.bounds(), _WM_BOX_CORNER, _WM_BOX_CORNER,
+        )
+        path.fill()
+
+
+def _add_watermark(container, screen_size, mode_text):
+    """Add VM + mode watermark labels in a rounded box. Returns (box, vm_label, mode_label)."""
     vm = _make_label("VM", _WM_VM_FONT_SIZE, None, _WM_VM_COLOR, draw_bg=False)
     vm_f = vm.frame()
-    vm.setFrameOrigin_((cx - vm_f.size.width / 2, cy))
 
     mode = _make_label(mode_text, _WM_MODE_FONT_SIZE, None, _WM_MODE_COLOR, draw_bg=False, bold=False)
     mode.setAlignment_(1)  # center
     mode_f = mode.frame()
-    mode.setFrame_(NSMakeRect(0, 0, mode_f.size.width + 4, mode_f.size.height))
-    mode.setFrameOrigin_((cx - (mode_f.size.width + 4) / 2, cy - mode_f.size.height - 4))
 
-    container.addSubview_(vm)
-    container.addSubview_(mode)
-    return vm, mode
+    # Size the box to fit both labels + padding
+    content_w = max(vm_f.size.width, mode_f.size.width + 4)
+    content_h = vm_f.size.height + mode_f.size.height + 4
+    box_w = content_w + _WM_BOX_PAD_X * 2
+    box_h = content_h + _WM_BOX_PAD_Y * 2
+
+    cx = screen_size.width / 2
+    cy = screen_size.height / 2
+
+    box = _RoundedBoxView.alloc().initWithFrame_(
+        NSMakeRect(cx - box_w / 2, cy - box_h / 2, box_w, box_h)
+    )
+
+    # Position labels relative to box
+    vm.setFrameOrigin_(((box_w - vm_f.size.width) / 2,
+                        _WM_BOX_PAD_Y + mode_f.size.height + 4))
+    mw = mode_f.size.width + 4
+    mode.setFrame_(NSMakeRect((box_w - mw) / 2, _WM_BOX_PAD_Y, mw, mode_f.size.height))
+
+    box.addSubview_(vm)
+    box.addSubview_(mode)
+    container.addSubview_(box)
+    return box, vm, mode
 
 
 class HintWindow(NSWindow):
@@ -160,9 +193,11 @@ class HintWindow(NSWindow):
         self.setHasShadow_(False)
 
         self._screen_size = screen.size
-        self._vm_label, self._mode_label = _add_watermark(
+        self._wm_box, self._vm_label, self._mode_label = _add_watermark(
             self.contentView(), screen.size, "NORMAL"
         )
+        self._wm_box.setHidden_(True)
+        self._flash_gen = 0
 
         return self
 
@@ -171,11 +206,22 @@ class HintWindow(NSWindow):
         self._mode_label.sizeToFit()
         f = self._mode_label.frame()
         w = f.size.width + 4
-        self._mode_label.setFrame_(NSMakeRect(0, 0, w, f.size.height))
-        vm_f = self._vm_label.frame()
-        cx = self._screen_size.width / 2
-        self._mode_label.setFrameOrigin_((cx - w / 2,
-                                           vm_f.origin.y - f.size.height - 4))
+        box_w = self._wm_box.frame().size.width
+        self._mode_label.setFrame_(NSMakeRect((box_w - w) / 2,
+                                               _WM_BOX_PAD_Y, w, f.size.height))
+        self._flash_watermark()
+
+    def _flash_watermark(self):
+        """Show watermark box for _WM_FLASH_DURATION seconds then hide."""
+        self._flash_gen += 1
+        gen = self._flash_gen
+        self._wm_box.setHidden_(False)
+
+        def _hide():
+            if self._flash_gen == gen:
+                self._wm_box.setHidden_(True)
+
+        AppHelper.callLater(_WM_FLASH_DURATION, _hide)
 
     def canBecomeKeyWindow(self):
         return not self.overlay._insert_mode
@@ -315,6 +361,7 @@ class HintOverlay:
         self._hide_all_labels()
         self._activate_overlay_window()
         self._start_watching_focus()
+        self.window._flash_watermark()
         self._notify_mode("N")
 
     def dismiss(self):
@@ -726,7 +773,10 @@ class HintOverlay:
         self._hints_visible = False
 
     def _show_insert_watermark(self):
-        """Show a passive floating watermark for INSERT mode."""
+        """Show a passive floating watermark for INSERT mode, auto-hides after 2s."""
+        self._hide_insert_watermark()
+        self._insert_wm_gen = getattr(self, "_insert_wm_gen", 0) + 1
+        gen = self._insert_wm_gen
         screen = NSScreen.mainScreen().frame()
         win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
             NSMakeRect(0, 0, screen.size.width, screen.size.height),
@@ -740,6 +790,12 @@ class HintOverlay:
         _add_watermark(win.contentView(), screen.size, "INSERT")
         win.orderFrontRegardless()
         self._insert_window = win
+
+        def _hide():
+            if getattr(self, "_insert_wm_gen", 0) == gen:
+                self._hide_insert_watermark()
+
+        AppHelper.callLater(_WM_FLASH_DURATION, _hide)
 
     def _hide_insert_watermark(self):
         """Remove the INSERT watermark window."""
