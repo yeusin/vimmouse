@@ -234,6 +234,8 @@ class SettingsController(NSObject):
             False,
         )
         w.setTitle_("VimMouse Settings")
+        w.setReleasedWhenClosed_(False)
+        w.setDelegate_(self)
         w.center()
         content = w.contentView()
         y = win_h - 40  # current y, top-down
@@ -459,4 +461,8 @@ class SettingsController(NSObject):
     def cancel_(self, sender):
         self._stop_all_recording()
         self._window.orderOut_(None)
+        NSApp.setActivationPolicy_(2)
+
+    def windowWillClose_(self, notification):
+        self._stop_all_recording()
         NSApp.setActivationPolicy_(2)
