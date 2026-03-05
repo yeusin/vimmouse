@@ -2,15 +2,22 @@
 
 import logging
 import signal
+import subprocess
 from AppKit import (
     NSApplication,
     NSApp,
+    NSBundle,
     NSMenu,
     NSMenuItem,
     NSOffState,
     NSOnState,
     NSStatusBar,
     NSVariableStatusItemLength,
+)
+from ApplicationServices import (
+    AXIsProcessTrusted,
+    AXIsProcessTrustedWithOptions,
+    kAXTrustedCheckOptionPrompt,
 )
 from Foundation import NSObject
 from PyObjCTools import AppHelper
@@ -88,12 +95,37 @@ class StatusBarController(NSObject):
         AppHelper.stopEventLoop()
 
 
+def _ensure_accessibility():
+    """Reset stale accessibility entry and re-prompt if needed."""
+    log = logging.getLogger(__name__)
+    if AXIsProcessTrusted():
+        log.info("Accessibility: already trusted")
+        return True
+
+    bundle_id = NSBundle.mainBundle().bundleIdentifier()
+    if bundle_id:
+        log.info("Accessibility: resetting TCC entry for %s", bundle_id)
+        subprocess.run(
+            ["tccutil", "reset", "Accessibility", bundle_id],
+            capture_output=True,
+        )
+
+    trusted = AXIsProcessTrustedWithOptions(
+        {kAXTrustedCheckOptionPrompt: True}
+    )
+    if not trusted:
+        log.warning("Accessibility: not yet trusted, prompting user")
+    return trusted
+
+
 def main():
     logging.basicConfig(
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
         level=logging.INFO,
     )
+
+    _ensure_accessibility()
 
     app = NSApplication.sharedApplication()
     # No Dock icon, no app switcher entry
