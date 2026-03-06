@@ -6,6 +6,7 @@ import objc
 import Quartz
 from AppKit import (
     NSBezierPath,
+    NSImageView,
     NSScreen,
     NSColor,
     NSFont,
@@ -13,6 +14,7 @@ from AppKit import (
     NSView,
     NSWindow,
     NSMakeRect,
+    NSMakeSize,
     NSBackingStoreBuffered,
     NSFloatingWindowLevel,
     NSWorkspace,
@@ -36,11 +38,14 @@ HINT_PADDING = 4
 HINT_CORNER_RADIUS = 4
 
 # Window hint style
-WIN_HINT_FONT_SIZE = 28
-WIN_HINT_BG_COLOR = (0.15, 0.15, 0.15, 0.85)  # dark gray
+WIN_HINT_FONT_SIZE = 20
+WIN_HINT_BG_COLOR = (0.12, 0.12, 0.12, 0.90)  # dark gray
 WIN_HINT_TEXT_COLOR = (1.0, 1.0, 1.0, 1.0)  # white
-WIN_HINT_PADDING = 12
-WIN_HINT_CORNER_RADIUS = 10
+WIN_HINT_PADDING_X = 14
+WIN_HINT_PADDING_Y = 10
+WIN_HINT_CORNER_RADIUS = 12
+WIN_HINT_ICON_SIZE = 32
+WIN_HINT_GAP = 10  # gap between icon and text
 
 # Watermark style
 _WM_VM_COLOR = (0.9, 0.70)  # white, alpha
@@ -170,10 +175,13 @@ def _make_label(text, font_size, bg_color, text_color, draw_bg=True, bold=True):
 class _RoundedBoxView(NSView):
     """NSView that draws a rounded semi-transparent rectangle."""
 
+    _bg_color = _WM_BOX_BG
+    _corner_radius = _WM_BOX_CORNER
+
     def drawRect_(self, rect):
-        NSColor.colorWithCalibratedRed_green_blue_alpha_(*_WM_BOX_BG).set()
+        NSColor.colorWithCalibratedRed_green_blue_alpha_(*self._bg_color).set()
         path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
-            self.bounds(), _WM_BOX_CORNER, _WM_BOX_CORNER,
+            self.bounds(), self._corner_radius, self._corner_radius,
         )
         path.fill()
 
@@ -275,6 +283,7 @@ class HintOverlay:
         self._clicking = False
         self._hints_visible = False
         self._hints_gen = 0
+        self._win_hint_cache = {}  # kCGWindowNumber -> hint char
 
         self._mouse_dir = None
         self._mouse_repeat_count = 0
@@ -508,16 +517,36 @@ class HintOverlay:
         return windows
 
     def _assign_window_hints(self, windows):
-        """Assign single-char hints to windows."""
+        """Assign single-char hints to windows, reusing cached assignments."""
         chars = self._hint_chars
-        assignments = []
         used = set()
-        for i, w in enumerate(windows):
-            if i >= len(chars):
-                break
-            hint = chars[i]
-            used.add(hint)
-            assignments.append((hint, w))
+        assignments = []
+
+        available_iter = iter(c for c in chars)
+
+        def next_available():
+            while True:
+                try:
+                    c = next(available_iter)
+                except StopIteration:
+                    return None
+                if c not in used:
+                    return c
+
+        new_cache = {}
+        for w in windows:
+            wid = w.get(Quartz.kCGWindowNumber, 0)
+            cached = self._win_hint_cache.get(wid)
+            if cached and cached not in used:
+                hint = cached
+            else:
+                hint = next_available()
+            if hint:
+                used.add(hint)
+                new_cache[wid] = hint
+                assignments.append((hint, w))
+
+        self._win_hint_cache = new_cache
         return assignments, used
 
     def _generate_element_hints(self, count, used_chars):
@@ -548,14 +577,31 @@ class HintOverlay:
         screen = NSScreen.mainScreen().frame()
         content = self.window.contentView()
 
+        # Compute initial positions for window hints
+        win_positions = []
         for hint, w in win_assignments:
             bounds = w[Quartz.kCGWindowBounds]
             cx = bounds["X"] + bounds["Width"] / 2
             cy = bounds["Y"] + bounds["Height"] / 2
             flipped_y = screen.size.height - cy
-            label = self._create_window_hint_label(hint, cx, flipped_y)
-            content.addSubview_(label)
-            self.labels.append((hint, label, w, "window"))
+            win_positions.append((hint, w, cx, flipped_y))
+
+        # Resolve overlaps: offset hints that share the same center
+        spacing = WIN_HINT_PADDING_Y * 2 + WIN_HINT_ICON_SIZE + 4
+        for i in range(len(win_positions)):
+            hi, wi, cxi, cyi = win_positions[i]
+            for j in range(i):
+                hj, wj, cxj, cyj = win_positions[j]
+                if abs(cxi - cxj) < spacing and abs(cyi - cyj) < spacing:
+                    # Push this hint below the previous one
+                    cyi = cyj - spacing
+                    win_positions[i] = (hi, wi, cxi, cyi)
+
+        for hint, w, cx, flipped_y in win_positions:
+            pid = w.get(Quartz.kCGWindowOwnerPID, 0)
+            view = self._create_window_hint_label(hint, cx, flipped_y, pid)
+            content.addSubview_(view)
+            self.labels.append((hint, view, w, "window"))
 
         elements.sort(key=lambda el: (_element_position(el)[1], _element_position(el)[0]))
         for hint, el in zip(el_hints, elements):
@@ -581,17 +627,44 @@ class HintOverlay:
         label.layer().setCornerRadius_(HINT_CORNER_RADIUS)
         return label
 
-    def _create_window_hint_label(self, hint_text, cx, flipped_cy):
-        """Create a large centered hint label for window switching."""
-        label = _make_label(hint_text, WIN_HINT_FONT_SIZE, WIN_HINT_BG_COLOR, WIN_HINT_TEXT_COLOR)
-        label.setAlignment_(1)  # NSTextAlignmentCenter
-        frame = label.frame()
-        w = frame.size.width + WIN_HINT_PADDING * 2
-        h = frame.size.height
-        label.setFrame_(NSMakeRect(cx - w / 2, flipped_cy - h / 2, w, h))
-        label.setWantsLayer_(True)
-        label.layer().setCornerRadius_(WIN_HINT_CORNER_RADIUS)
-        return label
+    def _create_window_hint_label(self, hint_text, cx, flipped_cy, pid):
+        """Create a window hint with app icon and label in a rounded box."""
+        label = _make_label(hint_text, WIN_HINT_FONT_SIZE, None, WIN_HINT_TEXT_COLOR, draw_bg=False)
+        lf = label.frame()
+
+        # Check for icon
+        app = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+        has_icon = app and app.icon()
+        icon_w = (WIN_HINT_ICON_SIZE + WIN_HINT_GAP) if has_icon else 0
+
+        content_w = icon_w + lf.size.width
+        content_h = max(WIN_HINT_ICON_SIZE, lf.size.height) if has_icon else lf.size.height
+        box_w = WIN_HINT_PADDING_X * 2 + content_w
+        box_h = WIN_HINT_PADDING_Y * 2 + content_h
+
+        box = _RoundedBoxView.alloc().initWithFrame_(
+            NSMakeRect(cx - box_w / 2, flipped_cy - box_h / 2, box_w, box_h)
+        )
+        box._bg_color = WIN_HINT_BG_COLOR
+        box._corner_radius = WIN_HINT_CORNER_RADIUS
+
+        x_offset = WIN_HINT_PADDING_X
+        if has_icon:
+            icon_view = NSImageView.alloc().initWithFrame_(
+                NSMakeRect(x_offset, (box_h - WIN_HINT_ICON_SIZE) / 2,
+                           WIN_HINT_ICON_SIZE, WIN_HINT_ICON_SIZE)
+            )
+            icon = app.icon()
+            icon.setSize_(NSMakeSize(WIN_HINT_ICON_SIZE, WIN_HINT_ICON_SIZE))
+            icon_view.setImage_(icon)
+            box.addSubview_(icon_view)
+            x_offset += WIN_HINT_ICON_SIZE + WIN_HINT_GAP
+
+        label.setFrame_(NSMakeRect(x_offset, (box_h - lf.size.height) / 2,
+                                   lf.size.width, lf.size.height))
+        box.addSubview_(label)
+
+        return box
 
     # -- Mouse movement --
 
