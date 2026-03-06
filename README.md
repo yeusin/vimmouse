@@ -8,6 +8,8 @@ VimMouse overlays hint labels on clickable elements (buttons, links, text fields
 
 - **Hint-based clicking** — Type 1-2 character hints to click any UI element
 - **Vim-style cursor movement** — HJKL keys with smooth acceleration
+- **App launcher** — Alfred-like fuzzy search to launch apps and System Preferences panes
+- **Window management** — Tile, split, center, and maximize windows with Ctrl+W prefix
 - **Window switching** — Single-letter hints to jump between visible windows
 - **Insert mode** — Passthrough mode for typing in the target app
 - **Fully customizable keybindings** — Remap every action via Settings UI
@@ -53,14 +55,30 @@ VimMouse enters Normal mode immediately on launch. Press **Cmd+Shift+Space** (de
 |-----|--------|
 | `h` / `j` / `k` / `l` | Move cursor left / down / up / right |
 | `Space` | Click at cursor position |
-| `/` or `f` | Toggle hint labels |
+| `Shift+Space` | Right-click at cursor position |
+| `f` | Toggle hint labels |
+| `/` | Open app launcher |
 | `i` | Enter Insert mode |
 | `w` | Mouse forward button |
 | `b` | Mouse back button |
-| `Ctrl+W` | Cycle through windows |
+| `Ctrl+W` | Window command prefix (see below) |
 | `Ctrl+B` | Scroll up |
 | `Ctrl+F` | Scroll down |
 | `Cmd+key` | Passed through to the target app |
+
+### Window Management
+
+Press `Ctrl+W` to enter window command mode, then press a second key:
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+W` | Cycle through windows |
+| `h` / `j` / `k` / `l` | Tile window to left / bottom / top / right half |
+| `1` / `2` / `3` / `4` | Tile window to quarter |
+| `q` / `w` / `e` | Tile window to top-left / top-center / top-right sixth |
+| `a` / `s` / `d` | Tile window to bottom-left / bottom-center / bottom-right sixth |
+| `c` | Center window |
+| `Enter` | Maximize window |
 
 ### Hints
 
@@ -113,6 +131,8 @@ Example config:
     ├── mouse.py            # Cursor movement, clicking, scrolling
     ├── config.py           # Config loading/saving, default keybindings
     ├── settings.py         # Settings UI, hotkey/key recorder
+    ├── launcher.py         # Alfred-like app launcher with fuzzy search
+    ├── window_manager.py   # Window tiling, splitting, centering, maximizing
     └── hotkey.py           # Global hotkey via CGEventTap
 ```
 
