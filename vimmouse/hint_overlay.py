@@ -163,6 +163,7 @@ class HintOverlay:
         self._pid = None
         self._ws_observer = None
         self._clicking = False
+        self._dragging = False
         self._hints_visible = False
         self._hints_gen = 0
         self._win_hint_cache = {}  # kCGWindowNumber -> hint char
@@ -280,16 +281,16 @@ class HintOverlay:
         repeat = bool(Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventAutorepeat))
 
         if action == "move_left":
-            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(-1, 0, repeat))
+            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(-1, 0, repeat, self._dragging))
             return None
         elif action == "move_down":
-            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(0, 1, repeat))
+            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(0, 1, repeat, self._dragging))
             return None
         elif action == "move_up":
-            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(0, -1, repeat))
+            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(0, -1, repeat, self._dragging))
             return None
         elif action == "move_right":
-            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(1, 0, repeat))
+            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(1, 0, repeat, self._dragging))
             return None
         elif action == "scroll_up":
             AppHelper.callAfter(lambda: self.scroll(3))
@@ -308,6 +309,9 @@ class HintOverlay:
             return None
         elif action == "right_click":
             AppHelper.callAfter(self.right_click_at_cursor)
+            return None
+        elif action == "toggle_drag":
+            AppHelper.callAfter(self.toggle_drag)
             return None
         elif action == "insert_mode":
             AppHelper.callAfter(self.enter_insert_mode)
@@ -577,6 +581,18 @@ class HintOverlay:
         x, y = mouse.get_cursor_position()
         log.info("click: cursor (%.0f, %.0f)", x, y)
         self._click_and_dismiss(x, y)
+
+    def toggle_drag(self):
+        """Toggle mouse drag: first call presses mouse down, second releases."""
+        x, y = mouse.get_cursor_position()
+        if not self._dragging:
+            log.info("drag: start (%.0f, %.0f)", x, y)
+            mouse.mouse_down(x, y)
+            self._dragging = True
+        else:
+            log.info("drag: end (%.0f, %.0f)", x, y)
+            mouse.mouse_up(x, y)
+            self._dragging = False
 
     def right_click_at_cursor(self):
         """Right-click at the current cursor position, then dismiss hints."""

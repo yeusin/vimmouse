@@ -20,10 +20,10 @@ class MouseController:
         self._mouse_repeat_count = 0
         self._last_move_time = 0
 
-    def move_relative(self, dx, dy, repeat=False):
+    def move_relative(self, dx, dy, repeat=False, dragging=False):
         """Move the mouse cursor with smooth acceleration."""
         now = time.time()
-        
+
         # If the last move was recent (within 300ms), we are in a movement session.
         if now - self._last_move_time < 0.3:
             # We continue the ramp smoothly without abrupt jumps.
@@ -31,7 +31,7 @@ class MouseController:
         else:
             # Movement stopped for too long; reset to base speed.
             self._mouse_repeat_count = 0
-        
+
         self._last_move_time = now
 
         # Calculate speed based on current ramp-up position
@@ -41,7 +41,7 @@ class MouseController:
         step = int(_MOUSE_S0 + (_MOUSE_STEP_MAX - _MOUSE_S0) * ease)
 
         x, y = get_cursor_position()
-        move_cursor(x + dx * step, y + dy * step)
+        move_cursor(x + dx * step, y + dy * step, dragging=dragging)
 
 
 def get_cursor_position():
@@ -51,15 +51,16 @@ def get_cursor_position():
     return point.x, point.y
 
 
-def move_cursor(x, y):
+def move_cursor(x, y, dragging=False):
     """Move the mouse cursor to (x, y), clamped to screen bounds."""
     w = Quartz.CGDisplayPixelsWide(Quartz.CGMainDisplayID())
     h = Quartz.CGDisplayPixelsHigh(Quartz.CGMainDisplayID())
     x = max(0, min(x, w - 1))
     y = max(0, min(y, h - 1))
     point = Quartz.CGPointMake(x, y)
+    event_type = Quartz.kCGEventLeftMouseDragged if dragging else Quartz.kCGEventMouseMoved
     event = Quartz.CGEventCreateMouseEvent(
-        None, Quartz.kCGEventMouseMoved, point, Quartz.kCGMouseButtonLeft
+        None, event_type, point, Quartz.kCGMouseButtonLeft
     )
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
 
@@ -75,6 +76,26 @@ def click(x, y):
         None, Quartz.kCGEventLeftMouseUp, point, Quartz.kCGMouseButtonLeft
     )
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, down)
+    Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)
+
+
+def mouse_down(x, y):
+    """Press and hold left mouse button at (x, y)."""
+    move_cursor(x, y)
+    point = Quartz.CGPointMake(x, y)
+    down = Quartz.CGEventCreateMouseEvent(
+        None, Quartz.kCGEventLeftMouseDown, point, Quartz.kCGMouseButtonLeft
+    )
+    Quartz.CGEventPost(Quartz.kCGHIDEventTap, down)
+
+
+def mouse_up(x, y):
+    """Release left mouse button at (x, y)."""
+    move_cursor(x, y)
+    point = Quartz.CGPointMake(x, y)
+    up = Quartz.CGEventCreateMouseEvent(
+        None, Quartz.kCGEventLeftMouseUp, point, Quartz.kCGMouseButtonLeft
+    )
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)
 
 

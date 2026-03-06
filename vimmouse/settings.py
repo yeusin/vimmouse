@@ -68,6 +68,7 @@ _ACTION_LABELS = {
     "forward": "Forward",
     "back": "Back",
     "right_click": "Right Click",
+    "toggle_drag": "Toggle Drag",
     "open_launcher": "App Launcher",
     "window_prefix": "Window Cmd",
     "win_cycle": "Win: Cycle",
