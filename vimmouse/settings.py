@@ -67,6 +67,7 @@ _ACTION_LABELS = {
     "insert_mode": "Insert Mode",
     "forward": "Forward",
     "back": "Back",
+    "open_launcher": "App Launcher",
 }
 
 

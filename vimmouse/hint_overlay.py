@@ -22,6 +22,7 @@ from PyObjCTools import AppHelper
 import ApplicationServices as AX
 from . import accessibility
 from . import config
+from .launcher import Launcher
 from . import mouse
 
 log = logging.getLogger(__name__)
@@ -245,6 +246,7 @@ class HintOverlay:
         self._cycle_windows = None
         self._cycle_idx = -1
         self._cycle_gen = 0
+        self._launcher = Launcher(on_dismiss=self._on_launcher_dismiss)
         self.reload_keybindings()
 
     def reload_keybindings(self):
@@ -366,6 +368,9 @@ class HintOverlay:
             return None
         elif action == "toggle_hints":
             AppHelper.callAfter(self.toggle_hints)
+            return None
+        elif action == "open_launcher":
+            AppHelper.callAfter(self._open_launcher)
             return None
         elif action == "cycle_window":
             AppHelper.callAfter(self.cycle_window)
@@ -734,6 +739,19 @@ class HintOverlay:
         self._hide_all_labels()
         self._hints_visible = False
         self.typed = ""
+
+    # -- Launcher --
+
+    def _open_launcher(self):
+        """Open the Alfred-like app launcher."""
+        self._hide_all_labels()
+        self._remove_normal_tap()
+        self._launcher.show()
+
+    def _on_launcher_dismiss(self):
+        """Called when the launcher is dismissed."""
+        self._update_target_app()
+        self._install_normal_tap()
 
     # -- Insert mode --
 
