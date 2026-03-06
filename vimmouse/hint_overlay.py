@@ -814,9 +814,21 @@ class HintOverlay:
     # -- Insert mode --
 
     def enter_insert_mode(self):
-        """Enter insert mode: pass all keys to the target app until hotkey toggle."""
+        """Enter insert mode: focus window under cursor and stop key capture."""
         if self._insert_mode:
             return
+
+        # Find window under cursor to focus it
+        mx, my = mouse.get_cursor_position()
+        windows = self._get_visible_windows()
+        for w in windows:
+            b = w.get(Quartz.kCGWindowBounds, {})
+            # Check if (mx, my) is inside this window's bounds
+            if (b.get("X", 0) <= mx <= b.get("X", 0) + b.get("Width", 0) and
+                b.get("Y", 0) <= my <= b.get("Y", 0) + b.get("Height", 0)):
+                self._switch_to_window(w)
+                break
+
         log.info("mode: INSERT")
         self._insert_mode = True
         self._notify_mode("I")
