@@ -19,8 +19,8 @@ _DEFAULT_KEYBINDINGS = {
     "move_right": {"keycode": 37},          # l
     "scroll_up": {"keycode": 11, "ctrl": True},    # ctrl+b
     "scroll_down": {"keycode": 3, "ctrl": True},   # ctrl+f
-    "toggle_hints": {"keycode": 3},                     # f
-    "toggle_all_hints": {"keycode": 3, "shift": True},   # shift+f
+    "toggle_hints": {"keycode": 3, "shift": True},         # shift+f
+    "toggle_all_hints": {"keycode": 3},                   # f
     "open_launcher": {"keycode": 44},                    # /
     "click": {"keycode": 49},              # space
     "insert_mode": {"keycode": 34},        # i
