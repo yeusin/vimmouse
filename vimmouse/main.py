@@ -5,7 +5,6 @@ import signal
 import subprocess
 from AppKit import (
     NSApplication,
-    NSApp,
     NSBundle,
     NSMenu,
     NSMenuItem,

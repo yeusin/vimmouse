@@ -5,13 +5,9 @@ import os
 import objc
 import Quartz
 from AppKit import (
-    NSBezierPath,
     NSImageView,
     NSScreen,
     NSColor,
-    NSFont,
-    NSTextField,
-    NSView,
     NSWindow,
     NSMakeRect,
     NSMakeSize,
@@ -26,7 +22,10 @@ from . import accessibility
 from . import config
 from .launcher import Launcher
 from . import mouse
-from . import window_manager
+from .mouse import MouseController
+from . import ui
+from .ui import WatermarkManager
+from .window_manager import WindowManager
 
 log = logging.getLogger(__name__)
 
@@ -47,18 +46,6 @@ WIN_HINT_CORNER_RADIUS = 12
 WIN_HINT_ICON_SIZE = 32
 WIN_HINT_GAP = 10  # gap between icon and text
 
-# Watermark style
-_WM_VM_COLOR = (0.9, 0.70)  # white, alpha
-_WM_VM_FONT_SIZE = 48
-_WM_MODE_COLOR = (0.9, 0.60)
-_WM_MODE_FONT_SIZE = 16
-_WM_FLASH_DURATION = 2.0  # seconds to show watermark
-_WM_BOX_BG = (0.0, 0.0, 0.0, 0.50)  # black, semi-transparent
-_WM_BOX_CORNER = 14
-_WM_BOX_PAD_X = 24
-_WM_BOX_PAD_Y = 16
-
-
 # macOS hardware key codes → Latin letters (input-source-independent)
 _KEYCODE_TO_CHAR = {
     0: "a", 1: "s", 2: "d", 3: "f", 4: "h", 5: "g", 6: "z", 7: "x",
@@ -71,9 +58,6 @@ _KEYCODE_TO_CHAR = {
 }
 _KEY_ESCAPE = 53
 _KEY_BACKSPACE = 51
-_MOUSE_S0 = 10        # base sensitivity (pixels per step)
-_MOUSE_STEP_MAX = 100  # cap on maximum step size
-_MOUSE_RAMP_FRAMES = 30  # frames to reach max speed
 _CTRL_FLAG = 1 << 18   # NSEventModifierFlagControl
 _SHIFT_FLAG = 1 << 17  # NSEventModifierFlagShift
 
@@ -110,22 +94,22 @@ def _build_window_binding_lookup(bindings):
 # Each returns a no-arg callable that AppHelper.callAfter can invoke.
 _WINDOW_ACTIONS = {
     "win_cycle": lambda o: o.cycle_window,
-    "win_tile_1": lambda o: lambda: window_manager.tile_window(1),
-    "win_tile_2": lambda o: lambda: window_manager.tile_window(2),
-    "win_tile_3": lambda o: lambda: window_manager.tile_window(3),
-    "win_tile_4": lambda o: lambda: window_manager.tile_window(4),
-    "win_sixth_tl": lambda o: lambda: window_manager.tile_window_sixth(0, 0),
-    "win_sixth_tc": lambda o: lambda: window_manager.tile_window_sixth(1, 0),
-    "win_sixth_tr": lambda o: lambda: window_manager.tile_window_sixth(2, 0),
-    "win_sixth_bl": lambda o: lambda: window_manager.tile_window_sixth(0, 1),
-    "win_sixth_bc": lambda o: lambda: window_manager.tile_window_sixth(1, 1),
-    "win_sixth_br": lambda o: lambda: window_manager.tile_window_sixth(2, 1),
-    "win_half_left": lambda o: lambda: window_manager.tile_window_half("left"),
-    "win_half_down": lambda o: lambda: window_manager.tile_window_half("bottom"),
-    "win_half_up": lambda o: lambda: window_manager.tile_window_half("top"),
-    "win_half_right": lambda o: lambda: window_manager.tile_window_half("right"),
-    "win_center": lambda o: window_manager.center_window,
-    "win_maximize": lambda o: window_manager.toggle_maximize,
+    "win_tile_1": lambda o: lambda: o._win_mgr.tile_window(1),
+    "win_tile_2": lambda o: lambda: o._win_mgr.tile_window(2),
+    "win_tile_3": lambda o: lambda: o._win_mgr.tile_window(3),
+    "win_tile_4": lambda o: lambda: o._win_mgr.tile_window(4),
+    "win_sixth_tl": lambda o: lambda: o._win_mgr.tile_window_sixth(0, 0),
+    "win_sixth_tc": lambda o: lambda: o._win_mgr.tile_window_sixth(1, 0),
+    "win_sixth_tr": lambda o: lambda: o._win_mgr.tile_window_sixth(2, 0),
+    "win_sixth_bl": lambda o: lambda: o._win_mgr.tile_window_sixth(0, 1),
+    "win_sixth_bc": lambda o: lambda: o._win_mgr.tile_window_sixth(1, 1),
+    "win_sixth_br": lambda o: lambda: o._win_mgr.tile_window_sixth(2, 1),
+    "win_half_left": lambda o: lambda: o._win_mgr.tile_window_half("left"),
+    "win_half_down": lambda o: lambda: o._win_mgr.tile_window_half("bottom"),
+    "win_half_up": lambda o: lambda: o._win_mgr.tile_window_half("top"),
+    "win_half_right": lambda o: lambda: o._win_mgr.tile_window_half("right"),
+    "win_center": lambda o: o._win_mgr.center_window,
+    "win_maximize": lambda o: o._win_mgr.toggle_maximize,
 }
 
 
@@ -149,79 +133,8 @@ def _element_position(el):
     return (pos.x, pos.y)
 
 
-def _make_label(text, font_size, bg_color, text_color, draw_bg=True, bold=True):
-    """Create a styled NSTextField label."""
-    label = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 0, 0))
-    label.setStringValue_(text)
-    label.setEditable_(False)
-    label.setSelectable_(False)
-    label.setBezeled_(False)
-    label.setDrawsBackground_(draw_bg)
-    if draw_bg:
-        label.setBackgroundColor_(
-            NSColor.colorWithCalibratedRed_green_blue_alpha_(*bg_color)
-        )
-    label.setTextColor_(
-        NSColor.colorWithCalibratedRed_green_blue_alpha_(*text_color)
-        if len(text_color) == 4
-        else NSColor.colorWithWhite_alpha_(*text_color)
-    )
-    font = NSFont.boldSystemFontOfSize_(font_size) if bold else NSFont.systemFontOfSize_(font_size)
-    label.setFont_(font)
-    label.sizeToFit()
-    return label
-
-
-class _RoundedBoxView(NSView):
-    """NSView that draws a rounded semi-transparent rectangle."""
-
-    _bg_color = _WM_BOX_BG
-    _corner_radius = _WM_BOX_CORNER
-
-    def drawRect_(self, rect):
-        NSColor.colorWithCalibratedRed_green_blue_alpha_(*self._bg_color).set()
-        path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
-            self.bounds(), self._corner_radius, self._corner_radius,
-        )
-        path.fill()
-
-
-def _add_watermark(container, screen_size, mode_text):
-    """Add VM + mode watermark labels in a rounded box. Returns (box, vm_label, mode_label)."""
-    vm = _make_label("VM", _WM_VM_FONT_SIZE, None, _WM_VM_COLOR, draw_bg=False)
-    vm_f = vm.frame()
-
-    mode = _make_label(mode_text, _WM_MODE_FONT_SIZE, None, _WM_MODE_COLOR, draw_bg=False, bold=False)
-    mode.setAlignment_(1)  # center
-    mode_f = mode.frame()
-
-    # Size the box to fit both labels + padding
-    content_w = max(vm_f.size.width, mode_f.size.width + 4)
-    content_h = vm_f.size.height + mode_f.size.height + 4
-    box_w = content_w + _WM_BOX_PAD_X * 2
-    box_h = content_h + _WM_BOX_PAD_Y * 2
-
-    cx = screen_size.width / 2
-    cy = screen_size.height / 2
-
-    box = _RoundedBoxView.alloc().initWithFrame_(
-        NSMakeRect(cx - box_w / 2, cy - box_h / 2, box_w, box_h)
-    )
-
-    # Position labels relative to box
-    vm.setFrameOrigin_(((box_w - vm_f.size.width) / 2,
-                        _WM_BOX_PAD_Y + mode_f.size.height + 4))
-    mw = mode_f.size.width + 4
-    mode.setFrame_(NSMakeRect((box_w - mw) / 2, _WM_BOX_PAD_Y, mw, mode_f.size.height))
-
-    box.addSubview_(vm)
-    box.addSubview_(mode)
-    container.addSubview_(box)
-    return box, vm, mode
-
-
 class HintWindow(NSWindow):
-    """Transparent full-screen window for visual overlay (hints, watermark)."""
+    """Transparent full-screen window for visual overlay (hints)."""
 
     def init(self):
         screen = NSScreen.mainScreen().frame()
@@ -238,36 +151,7 @@ class HintWindow(NSWindow):
         self.setBackgroundColor_(NSColor.colorWithWhite_alpha_(0.0, 0.01))
         self.setIgnoresMouseEvents_(True)
         self.setHasShadow_(False)
-
-        self._wm_box, self._vm_label, self._mode_label = _add_watermark(
-            self.contentView(), screen.size, "NORMAL"
-        )
-        self._wm_box.setHidden_(True)
-        self._flash_gen = 0
-
         return self
-
-    def _set_mode(self, text):
-        self._mode_label.setStringValue_(text)
-        self._mode_label.sizeToFit()
-        f = self._mode_label.frame()
-        w = f.size.width + 4
-        box_w = self._wm_box.frame().size.width
-        self._mode_label.setFrame_(NSMakeRect((box_w - w) / 2,
-                                               _WM_BOX_PAD_Y, w, f.size.height))
-        self._flash_watermark()
-
-    def _flash_watermark(self):
-        """Show watermark box for _WM_FLASH_DURATION seconds then hide."""
-        self._flash_gen += 1
-        gen = self._flash_gen
-        self._wm_box.setHidden_(False)
-
-        def _hide():
-            if self._flash_gen == gen:
-                self._wm_box.setHidden_(True)
-
-        AppHelper.callLater(_WM_FLASH_DURATION, _hide)
 
 
 class HintOverlay:
@@ -277,18 +161,17 @@ class HintOverlay:
         self.labels = []  # [(hint_string, NSTextField, data, kind)]
         self.typed = ""
         self._pid = None
-        self._scroll_gen = 0
-        self._scroll_pending = False
         self._ws_observer = None
         self._clicking = False
         self._hints_visible = False
         self._hints_gen = 0
         self._win_hint_cache = {}  # kCGWindowNumber -> hint char
 
-        self._mouse_dir = None
-        self._mouse_repeat_count = 0
+        self._mouse_ctrl = MouseController()
+        self._watermark = WatermarkManager()
+        self._win_mgr = WindowManager()
+
         self._insert_mode = False
-        self._insert_window = None
         self._normal_tap = None
         self._normal_source = None
         self._menu_tap = None
@@ -397,16 +280,16 @@ class HintOverlay:
         repeat = bool(Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventAutorepeat))
 
         if action == "move_left":
-            AppHelper.callAfter(lambda: self.move_mouse(-1, 0, repeat))
+            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(-1, 0, repeat))
             return None
         elif action == "move_down":
-            AppHelper.callAfter(lambda: self.move_mouse(0, 1, repeat))
+            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(0, 1, repeat))
             return None
         elif action == "move_up":
-            AppHelper.callAfter(lambda: self.move_mouse(0, -1, repeat))
+            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(0, -1, repeat))
             return None
         elif action == "move_right":
-            AppHelper.callAfter(lambda: self.move_mouse(1, 0, repeat))
+            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(1, 0, repeat))
             return None
         elif action == "scroll_up":
             AppHelper.callAfter(lambda: self.scroll(3))
@@ -440,7 +323,7 @@ class HintOverlay:
             return None
         elif action == "window_prefix":
             self._window_cmd_pending = True
-            AppHelper.callAfter(lambda: self.window._set_mode("WINDOW"))
+            AppHelper.callAfter(lambda: self._watermark.set_mode("WINDOW"))
             return None
         elif code in _KEYCODE_TO_CHAR and _KEYCODE_TO_CHAR[code].isalpha():
             char = _KEYCODE_TO_CHAR[code].upper()
@@ -465,7 +348,7 @@ class HintOverlay:
         self.window.orderFrontRegardless()
         self._install_normal_tap()
         self._start_watching_focus()
-        self.window._flash_watermark()
+        self._watermark.flash()
         self._notify_mode("N")
 
     # -- Focus watching --
@@ -491,11 +374,10 @@ class HintOverlay:
         if activated_pid == os.getpid():
             return
         self._hide_all_labels()
-        self._pid = activated_pid
         if self._hints_visible:
-            elements = accessibility.get_clickable_elements(self._pid)
-            if elements:
-                self._populate(elements)
+            self.refresh(pid=activated_pid, auto_hide_after=2.0)
+        else:
+            self._pid = activated_pid
 
     # -- Hint population --
 
@@ -616,7 +498,7 @@ class HintOverlay:
 
     def _create_hint_label(self, hint_text, x, flipped_y):
         """Create a styled hint label at the given screen position."""
-        label = _make_label(hint_text, HINT_FONT_SIZE, HINT_BG_COLOR, HINT_TEXT_COLOR)
+        label = ui.make_label(hint_text, HINT_FONT_SIZE, HINT_BG_COLOR, HINT_TEXT_COLOR)
         frame = label.frame()
         label.setFrame_(
             NSMakeRect(
@@ -632,7 +514,7 @@ class HintOverlay:
 
     def _create_window_hint_label(self, hint_text, cx, flipped_cy, pid):
         """Create a window hint with app icon and label in a rounded box."""
-        label = _make_label(hint_text, WIN_HINT_FONT_SIZE, None, WIN_HINT_TEXT_COLOR, draw_bg=False)
+        label = ui.make_label(hint_text, WIN_HINT_FONT_SIZE, None, WIN_HINT_TEXT_COLOR, draw_bg=False)
         lf = label.frame()
 
         # Check for icon
@@ -645,11 +527,10 @@ class HintOverlay:
         box_w = WIN_HINT_PADDING_X * 2 + content_w
         box_h = WIN_HINT_PADDING_Y * 2 + content_h
 
-        box = _RoundedBoxView.alloc().initWithFrame_(
-            NSMakeRect(cx - box_w / 2, flipped_cy - box_h / 2, box_w, box_h)
+        box = ui.RoundedBoxView.alloc().initWithFrame_color_radius_(
+            NSMakeRect(cx - box_w / 2, flipped_cy - box_h / 2, box_w, box_h),
+            WIN_HINT_BG_COLOR, WIN_HINT_CORNER_RADIUS
         )
-        box._bg_color = WIN_HINT_BG_COLOR
-        box._corner_radius = WIN_HINT_CORNER_RADIUS
 
         x_offset = WIN_HINT_PADDING_X
         if has_icon:
@@ -669,43 +550,17 @@ class HintOverlay:
 
         return box
 
-    # -- Mouse movement --
-
-    def move_mouse(self, dx, dy, repeat=False):
-        """Move the mouse cursor with easeOutCubic acceleration."""
-        direction = (dx, dy)
-        if repeat and self._mouse_dir == direction:
-            self._mouse_repeat_count = min(self._mouse_repeat_count + 1, _MOUSE_RAMP_FRAMES)
-        else:
-            self._mouse_repeat_count = 0
-        self._mouse_dir = direction
-        t = self._mouse_repeat_count / _MOUSE_RAMP_FRAMES
-        ease = 4 * t ** 3 if t < 0.5 else 1 - (-2 * t + 2) ** 3 / 2  # easeInOutCubic
-        step = int(_MOUSE_S0 + (_MOUSE_STEP_MAX - _MOUSE_S0) * ease)
-        x, y = mouse.get_cursor_position()
-        mouse.move_cursor(x + dx * step, y + dy * step)
-
     # -- Scrolling --
 
     def scroll(self, lines):
-        """Scroll the target app. Hints hide during scrolling, refresh when idle."""
+        """Scroll the target app. Dismiss hints if they are visible."""
         log.info("scroll: lines=%d", lines)
         mouse.scroll(lines)
-        if not self._scroll_pending:
-            self._hide_all_labels()
-        self._scroll_gen += 1
-        self._scroll_pending = True
-        gen = self._scroll_gen
-        AppHelper.callLater(1.0, lambda: self._refresh_if_idle(gen))
-
-    def _refresh_if_idle(self, gen):
-        """Refresh hints only if no further scrolling happened since gen."""
-        if gen != self._scroll_gen or not self.window:
-            return
-        self._scroll_pending = False
         if self._hints_visible:
-            elements = accessibility.get_clickable_elements(self._pid)
-            self._populate(elements)
+            self._hide_all_labels()
+            self._hints_visible = False
+            self.typed = ""
+        self._hints_gen += 1  # Cancel any pending auto-hide
 
     # -- Clicking --
 
@@ -718,28 +573,83 @@ class HintOverlay:
         mouse.forward_button()
 
     def click_at_cursor(self):
-        """Click at the current cursor position, then refresh hints."""
+        """Click at the current cursor position, then dismiss hints."""
         x, y = mouse.get_cursor_position()
         log.info("click: cursor (%.0f, %.0f)", x, y)
-        self._click_and_refresh(x, y)
+        self._click_and_dismiss(x, y)
 
     def right_click_at_cursor(self):
-        """Right-click at the current cursor position, then refresh hints."""
+        """Right-click at the current cursor position, then dismiss hints."""
         x, y = mouse.get_cursor_position()
         log.info("right_click: cursor (%.0f, %.0f)", x, y)
-        self._right_click_and_refresh(x, y)
+        self._right_click_and_dismiss(x, y)
 
-    def _click_and_refresh(self, x, y):
-        """Hide hints, click at (x, y) in the target app, then refresh hints."""
+    def _click_and_dismiss(self, x, y):
+        """Hide hints and click at (x, y) in the target app."""
         self._clicking = True
         self._hide_all_labels()
         mouse.click(x, y)
         self._clicking = False
         self._update_target_app()
-        if self._hints_visible:
-            self.refresh()
+        self._hints_visible = False
+        self.typed = ""
 
-    def _right_click_and_refresh(self, x, y):
+    def type_char(self, char):
+        """Handle a typed letter: filter hints, click if unique match."""
+        self.typed += char
+        matching = []
+        for hint, label, data, kind in self.labels:
+            if hint.startswith(self.typed):
+                label.setHidden_(False)
+                matching.append((hint, label, data, kind))
+            else:
+                label.setHidden_(True)
+
+        if len(matching) == 1:
+            hint, label, data, kind = matching[0]
+            if kind == "window":
+                self._hide_all_labels()
+                self._hints_visible = False
+                self.typed = ""
+                self._switch_to_window(data)
+            else:
+                if accessibility.is_element_stale(data["element"]):
+                    log.warning("click: element is stale, refreshing")
+                    self.refresh()
+                    return
+                cx, cy = mouse.element_center(data["position"], data["size"])
+                log.info("click: hint=%s role=%s title=%r (%.0f, %.0f)", hint, data["role"], data.get("title", ""), cx, cy)
+                self._click_and_dismiss(cx, cy)
+        elif len(matching) == 0:
+            self.typed = ""
+            for _, label, _, _ in self.labels:
+                label.setHidden_(False)
+            self._reset_hints_timer()
+        else:
+            self._reset_hints_timer()
+
+    def backspace(self):
+        """Remove last typed char and re-show matching hints."""
+        if not self.typed:
+            return
+        self.typed = self.typed[:-1]
+        for hint, label, _, _ in self.labels:
+            if hint.startswith(self.typed):
+                label.setHidden_(False)
+            else:
+                label.setHidden_(True)
+        self._reset_hints_timer()
+
+    def _reset_hints_timer(self):
+        """Extend the auto-hide timer."""
+        if not self._hints_visible:
+            return
+        self._hints_gen += 1
+        gen = self._hints_gen
+        # Give them another 2s
+        AppHelper.callLater(2.0, lambda: self._auto_hide_hints(gen))
+
+    def _right_click_and_dismiss(self, x, y):
         """Right-click and enter menu mode with a global tap for mouse movement."""
         self._clicking = True
         self._hide_all_labels()
@@ -792,19 +702,19 @@ class HintOverlay:
 
         if action == "move_left":
             repeat = bool(Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventAutorepeat))
-            AppHelper.callAfter(lambda: self.move_mouse(-1, 0, repeat))
+            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(-1, 0, repeat))
             return None
         elif action == "move_down":
             repeat = bool(Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventAutorepeat))
-            AppHelper.callAfter(lambda: self.move_mouse(0, 1, repeat))
+            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(0, 1, repeat))
             return None
         elif action == "move_up":
             repeat = bool(Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventAutorepeat))
-            AppHelper.callAfter(lambda: self.move_mouse(0, -1, repeat))
+            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(0, -1, repeat))
             return None
         elif action == "move_right":
             repeat = bool(Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventAutorepeat))
-            AppHelper.callAfter(lambda: self.move_mouse(1, 0, repeat))
+            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(1, 0, repeat))
             return None
         elif action == "click" or code == _KEY_ESCAPE:
             AppHelper.callAfter(self._exit_menu_mode)
@@ -823,12 +733,26 @@ class HintOverlay:
 
     # -- Refresh / Toggle --
 
-    def refresh(self):
-        """Re-collect elements and refresh hints."""
+    def refresh(self, pid=None, auto_hide_after=None):
+        """Re-collect elements and refresh hints. Optionally specify a target PID and auto-hide timer."""
+        if pid is not None:
+            self._pid = pid
+        else:
+            self._update_target_app()
+
         elements = accessibility.get_clickable_elements(self._pid)
         if elements:
             self._populate(elements)
+        else:
+            for _, label, _, _ in self.labels:
+                label.removeFromSuperview()
+            self.labels = []
         self._hints_visible = True
+
+        if auto_hide_after:
+            self._hints_gen += 1
+            gen = self._hints_gen
+            AppHelper.callLater(auto_hide_after, lambda: self._auto_hide_hints(gen))
 
     def toggle_hints(self):
         """Show hints for 2 seconds, or dismiss if already visible."""
@@ -837,10 +761,7 @@ class HintOverlay:
             self._hide_all_labels()
             self._hints_visible = False
         else:
-            self.refresh()
-            self._hints_gen += 1
-            gen = self._hints_gen
-            AppHelper.callLater(2.0, lambda: self._auto_hide_hints(gen))
+            self.refresh(auto_hide_after=2.0)
 
     def toggle_all_hints(self):
         """Show hints for all visible apps, or dismiss if already visible."""
@@ -900,13 +821,7 @@ class HintOverlay:
         self._insert_mode = True
         self._notify_mode("I")
         self._remove_normal_tap()
-
-        # Hide the normal-mode watermark immediately to avoid overlap
-        if self.window:
-            self.window._flash_gen += 1
-            self.window._wm_box.setHidden_(True)
-
-        self._show_insert_watermark()
+        self._watermark.set_mode("INSERT")
 
     def _exit_insert_mode(self):
         """Exit insert mode and restore the overlay."""
@@ -918,42 +833,10 @@ class HintOverlay:
             return
 
         self._update_target_app()
-        self._hide_insert_watermark()
-        self.window._set_mode("NORMAL")
+        self._watermark.set_mode("NORMAL")
         self._install_normal_tap()
         self._hide_all_labels()
         self._hints_visible = False
-
-    def _show_insert_watermark(self):
-        """Show a passive floating watermark for INSERT mode, auto-hides after 2s."""
-        self._hide_insert_watermark()
-        self._insert_wm_gen = getattr(self, "_insert_wm_gen", 0) + 1
-        gen = self._insert_wm_gen
-        screen = NSScreen.mainScreen().frame()
-        win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(0, 0, screen.size.width, screen.size.height),
-            0, NSBackingStoreBuffered, False,
-        )
-        win.setLevel_(NSFloatingWindowLevel)
-        win.setOpaque_(False)
-        win.setBackgroundColor_(NSColor.colorWithWhite_alpha_(0.0, 0.0))
-        win.setIgnoresMouseEvents_(True)
-        win.setHasShadow_(False)
-        _add_watermark(win.contentView(), screen.size, "INSERT")
-        win.orderFrontRegardless()
-        self._insert_window = win
-
-        def _hide():
-            if getattr(self, "_insert_wm_gen", 0) == gen:
-                self._hide_insert_watermark()
-
-        AppHelper.callLater(_WM_FLASH_DURATION, _hide)
-
-    def _hide_insert_watermark(self):
-        """Remove the INSERT watermark window."""
-        if self._insert_window:
-            self._insert_window.orderOut_(None)
-            self._insert_window = None
 
     # -- Window switching --
 
@@ -1012,8 +895,6 @@ class HintOverlay:
             app.activateWithOptions_(0)
             self._pid = pid
         self._raise_window(pid, bounds)
-        if self.window:
-            self.refresh()
 
     def _raise_window(self, pid, bounds):
         """Raise a specific window by matching its position/size via Accessibility."""
@@ -1040,50 +921,3 @@ class HintOverlay:
                 log.info("  [%d] MATCHED — raised", i)
                 return
         log.info("_raise_window: no match found")
-
-    # -- Hint typing --
-
-    def _reset_hints_timer(self):
-        """Reset the 2-second auto-hide timer for hints."""
-        self._hints_gen += 1
-        gen = self._hints_gen
-        AppHelper.callLater(2.0, lambda: self._auto_hide_hints(gen))
-
-    def type_char(self, char):
-        """Handle a typed letter: filter hints, click if unique match."""
-        self.typed += char
-        matching = []
-        for hint, label, data, kind in self.labels:
-            if hint.startswith(self.typed):
-                label.setHidden_(False)
-                matching.append((hint, label, data, kind))
-            else:
-                label.setHidden_(True)
-
-        if len(matching) == 1:
-            hint, label, data, kind = matching[0]
-            if kind == "window":
-                self._switch_to_window(data)
-            else:
-                cx, cy = mouse.element_center(data["position"], data["size"])
-                log.info("click: hint=%s role=%s title=%r (%.0f, %.0f)", hint, data["role"], data.get("title", ""), cx, cy)
-                self._click_and_refresh(cx, cy)
-        elif len(matching) == 0:
-            self.typed = ""
-            for _, label, _, _ in self.labels:
-                label.setHidden_(False)
-            self._reset_hints_timer()
-        else:
-            self._reset_hints_timer()
-
-    def backspace(self):
-        """Remove last typed char and re-show matching hints."""
-        if not self.typed:
-            return
-        self.typed = self.typed[:-1]
-        for hint, label, _, _ in self.labels:
-            if hint.startswith(self.typed):
-                label.setHidden_(False)
-            else:
-                label.setHidden_(True)
-        self._reset_hints_timer()

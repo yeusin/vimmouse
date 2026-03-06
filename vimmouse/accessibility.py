@@ -69,6 +69,13 @@ def _get_attr(element, attr):
         return value
     return None
 
+def is_element_stale(element):
+    """Check if an AX element is no longer valid or visible."""
+    # Try to fetch a basic attribute; if it fails, it's likely stale
+    err, _ = AX.AXUIElementCopyAttributeValue(element, "AXRole", None)
+    if err != 0:
+        return True
+    return False
 
 def _is_clickable(role, element):
     """Check if an element can be clicked."""

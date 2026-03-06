@@ -1,11 +1,44 @@
 """Cursor movement and click simulation via CGEvent."""
 
+import time
 import Quartz
 from ApplicationServices import (
     kAXValueCGPointType,
     kAXValueCGSizeType,
     AXValueGetValue,
 )
+
+
+_MOUSE_S0 = 10        # base sensitivity (pixels per step)
+_MOUSE_STEP_MAX = 100  # cap on maximum step size
+_MOUSE_RAMP_FRAMES = 30  # frames to reach max speed
+
+
+class MouseController:
+    """Manages mouse state, including acceleration for keyboard-driven movement."""
+    def __init__(self):
+        self._mouse_repeat_count = 0
+        self._last_move_time = 0
+
+    def move_relative(self, dx, dy, repeat=False):
+        """Move the mouse cursor with acceleration. Maintains speed across direction changes."""
+        now = time.time()
+        # If the last move was recent (e.g. within 200ms), keep accelerating
+        # regardless of whether this specific key is a "repeat" event.
+        if now - self._last_move_time < 0.2:
+            self._mouse_repeat_count = min(self._mouse_repeat_count + 1, _MOUSE_RAMP_FRAMES)
+        else:
+            self._mouse_repeat_count = 0
+
+        self._last_move_time = now
+
+        t = self._mouse_repeat_count / _MOUSE_RAMP_FRAMES
+        # easeInOutCubic
+        ease = 4 * t ** 3 if t < 0.5 else 1 - (-2 * t + 2) ** 3 / 2
+        step = int(_MOUSE_S0 + (_MOUSE_STEP_MAX - _MOUSE_S0) * ease)
+
+        x, y = get_cursor_position()
+        move_cursor(x + dx * step, y + dy * step)
 
 
 def get_cursor_position():

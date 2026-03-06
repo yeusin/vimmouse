@@ -4,17 +4,14 @@ import logging
 import os
 
 import objc
-import Quartz
 from AppKit import (
     NSApp,
     NSBackingStoreBuffered,
     NSBezierPath,
     NSColor,
-    NSEvent,
     NSFont,
     NSFontWeightMedium,
     NSImageView,
-    NSKeyDownMask,
     NSMakeRect,
     NSMakeSize,
     NSScreen,
