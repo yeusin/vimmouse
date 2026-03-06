@@ -814,20 +814,29 @@ class HintOverlay:
     # -- Insert mode --
 
     def enter_insert_mode(self):
-        """Enter insert mode: focus window under cursor and stop key capture."""
+        """Enter insert mode: prefer current focused window, fallback to window under cursor."""
         if self._insert_mode:
             return
 
-        # Find window under cursor to focus it
-        mx, my = mouse.get_cursor_position()
-        windows = self._get_visible_windows()
-        for w in windows:
-            b = w.get(Quartz.kCGWindowBounds, {})
-            # Check if (mx, my) is inside this window's bounds
-            if (b.get("X", 0) <= mx <= b.get("X", 0) + b.get("Width", 0) and
-                b.get("Y", 0) <= my <= b.get("Y", 0) + b.get("Height", 0)):
-                self._switch_to_window(w)
-                break
+        # First priority: check if there's already a focused window
+        system = AX.AXUIElementCreateSystemWide()
+        err, focused_app = AX.AXUIElementCopyAttributeValue(system, "AXFocusedApplication", None)
+        has_focused_window = False
+        if err == 0 and focused_app:
+            err2, focused_win = AX.AXUIElementCopyAttributeValue(focused_app, "AXFocusedWindow", None)
+            if err2 == 0 and focused_win:
+                has_focused_window = True
+
+        # Second priority: find and focus window under cursor
+        if not has_focused_window:
+            mx, my = mouse.get_cursor_position()
+            windows = self._get_visible_windows()
+            for w in windows:
+                b = w.get(Quartz.kCGWindowBounds, {})
+                if (b.get("X", 0) <= mx <= b.get("X", 0) + b.get("Width", 0) and
+                    b.get("Y", 0) <= my <= b.get("Y", 0) + b.get("Height", 0)):
+                    self._switch_to_window(w)
+                    break
 
         log.info("mode: INSERT")
         self._insert_mode = True
