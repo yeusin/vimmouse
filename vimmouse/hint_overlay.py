@@ -764,6 +764,11 @@ class HintOverlay:
         self._notify_mode("I")
         self._remove_normal_tap()
 
+        # Hide the normal-mode watermark immediately to avoid overlap
+        if self.window:
+            self.window._flash_gen += 1
+            self.window._wm_box.setHidden_(True)
+
         self._show_insert_watermark()
 
     def _exit_insert_mode(self):
