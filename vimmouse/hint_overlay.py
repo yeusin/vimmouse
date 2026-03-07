@@ -52,9 +52,9 @@ _KEYCODE_TO_CHAR = {
     8: "c", 9: "v", 11: "b", 12: "q", 13: "w", 14: "e", 15: "r",
     16: "y", 17: "t", 18: "1", 19: "2", 20: "3", 21: "4", 22: "6",
     23: "5", 24: "=", 25: "9", 26: "7", 27: "-", 28: "8", 29: "0",
-    30: "]", 31: "o", 32: "u", 33: "[", 34: "i", 35: "p", 37: "l",
-    38: "j", 40: "k", 41: ";", 42: "'", 43: ",", 44: "/", 45: "n",
-    46: "m", 47: ".",
+    30: "]", 31: "o", 32: "u", 33: "[", 34: "i", 35: "p", 36: "return",
+    37: "l", 38: "j", 39: "'", 40: "k", 41: ";", 42: "\\", 43: ",",
+    44: "/", 45: "n", 46: "m", 47: ".", 48: "tab", 49: "space", 50: "`",
 }
 _KEY_ESCAPE = 53
 _KEY_BACKSPACE = 51
@@ -257,9 +257,11 @@ class HintOverlay:
         # Pass Cmd+key combos through to the target app
         if cmd and not ctrl:
             return event
-        # Pass Escape through
+            
+        # Block Escape and reset typing
         if code == _KEY_ESCAPE:
-            return event
+            AppHelper.callAfter(self.reset_typing)
+            return None
 
         if code == _KEY_BACKSPACE:
             AppHelper.callAfter(self.backspace)
@@ -274,7 +276,7 @@ class HintOverlay:
                 if handler:
                     AppHelper.callAfter(handler(self))
                     return None
-            return event  # cancel, pass through
+            return None  # Block unmatched keys after prefix
 
         shift = bool(flags & _SHIFT_FLAG)
         action = self._binding_lookup.get((code, ctrl, shift))
@@ -329,12 +331,34 @@ class HintOverlay:
             self._window_cmd_pending = True
             AppHelper.callAfter(lambda: self._watermark.set_mode("WINDOW"))
             return None
-        elif code in _KEYCODE_TO_CHAR and _KEYCODE_TO_CHAR[code].isalpha():
-            char = _KEYCODE_TO_CHAR[code].upper()
-            AppHelper.callAfter(lambda c=char: self.type_char(c))
+        elif code in _KEYCODE_TO_CHAR:
+            if self._hints_visible:
+                char = _KEYCODE_TO_CHAR[code].upper()
+                AppHelper.callAfter(lambda c=char: self.type_char(c))
             return None
 
         return event
+
+    def reset_typing(self):
+        """Reset currently typed hint characters and show all labels. If none typed, dismiss hints."""
+        if not self._hints_visible:
+            self.typed = ""
+            return
+
+        if not self.typed:
+            # Hints are visible but nothing is typed: dismiss them.
+            self._hide_all_labels()
+            self._hints_visible = False
+            return
+
+        # Hints are visible and something is typed: reset the filter.
+        self.typed = ""
+        for _, label, _, _ in self.labels:
+            label.setHidden_(False)
+        self._hints_gen += 1  # Cancel current timer
+        # Start a fresh 2s timer for the reset state
+        gen = self._hints_gen
+        AppHelper.callLater(2.0, lambda: self._auto_hide_hints(gen))
 
     # -- Show / Normal mode --
 
@@ -637,11 +661,13 @@ class HintOverlay:
                 log.info("click: hint=%s role=%s title=%r (%.0f, %.0f)", hint, data["role"], data.get("title", ""), cx, cy)
                 self._click_and_dismiss(cx, cy)
         elif len(matching) == 0:
+            # No match found - reset typing and show all labels again
             self.typed = ""
             for _, label, _, _ in self.labels:
                 label.setHidden_(False)
             self._reset_hints_timer()
         else:
+            # Multiple matches - just extend the timer
             self._reset_hints_timer()
 
     def backspace(self):
@@ -649,11 +675,17 @@ class HintOverlay:
         if not self.typed:
             return
         self.typed = self.typed[:-1]
-        for hint, label, _, _ in self.labels:
-            if hint.startswith(self.typed):
+        if not self.typed:
+            # Show everything
+            for _, label, _, _ in self.labels:
                 label.setHidden_(False)
-            else:
-                label.setHidden_(True)
+        else:
+            # Show only matches
+            for hint, label, _, _ in self.labels:
+                if hint.startswith(self.typed):
+                    label.setHidden_(False)
+                else:
+                    label.setHidden_(True)
         self._reset_hints_timer()
 
     def _reset_hints_timer(self):
