@@ -20,11 +20,12 @@ from PyObjCTools import AppHelper
 import ApplicationServices as AX
 from . import accessibility
 from . import config
+from . import hotkey
 from .launcher import Launcher
 from . import mouse
 from .mouse import MouseController
 from . import ui
-from .ui import WatermarkManager
+from .ui import WatermarkManager, CheatSheetOverlay
 from .window_manager import WindowManager
 
 log = logging.getLogger(__name__)
@@ -170,6 +171,7 @@ class HintOverlay:
 
         self._mouse_ctrl = MouseController()
         self._watermark = WatermarkManager()
+        self._cheat_sheet = CheatSheetOverlay()
         self._win_mgr = WindowManager()
 
         self._insert_mode = False
@@ -183,6 +185,43 @@ class HintOverlay:
         self._window_cmd_pending = False
         self._launcher = Launcher(on_dismiss=self._on_launcher_dismiss)
         self.reload_keybindings()
+
+    def _get_cheat_sheet_sections(self):
+        """Return dynamic cheat sheet sections based on current keybindings."""
+        def b(action):
+            spec = self._bindings.get(action)
+            return config.format_binding(spec, use_symbols=False) if spec else "??"
+
+        sections = [
+            ("Navigation", [
+                (f"{b('move_up')} {b('move_down')} {b('move_left')} {b('move_right')}", "Move mouse cursor"),
+                (b("click"), "Left click"),
+                (b("right_click"), "Right click"),
+                (f"{b('scroll_up')} / {b('scroll_down')}", "Scroll up / down"),
+                (f"{b('back')} / {b('forward')}", "Mouse back / forward"),
+                (b("toggle_drag"), "Toggle mouse drag"),
+            ]),
+            ("Hints", [
+                (b("toggle_all_hints"), "Toggle hint labels (2s)"),
+                ("1-2 chars", "Click hinted element"),
+                ("Esc", "Reset typing / Dismiss hints"),
+            ]),
+            ("Modes & Tools", [
+                (b("insert_mode"), "Enter Insert mode"),
+                (b("open_launcher"), "Open app launcher"),
+                (b("window_prefix"), "Enter Window command mode"),
+                (config.format_hotkey(*hotkey.get_hotkey(), use_symbols=False), "Return to Normal mode"),
+            ]),
+            ("Window Commands (Prefix + ...)", [
+                (f"{b('win_half_up')} {b('win_half_down')} {b('win_half_left')} {b('win_half_right')}", "Tile to half screen"),
+                (f"{b('win_tile_1')} {b('win_tile_2')} {b('win_tile_3')} {b('win_tile_4')}", "Tile to quarter screen"),
+                (f"{b('win_sixth_tl')} {b('win_sixth_tc')} {b('win_sixth_tr')}", "Tile to top sixth"),
+                (f"{b('win_sixth_bl')} {b('win_sixth_bc')} {b('win_sixth_br')}", "Tile to bottom sixth"),
+                (f"{b('win_center')} / {b('win_maximize')}", "Center / Maximize window"),
+                (b("win_cycle"), "Cycle through windows"),
+            ])
+        ]
+        return sections
 
     def reload_keybindings(self):
         """Load keybindings from config and rebuild lookup tables."""
@@ -282,56 +321,53 @@ class HintOverlay:
         action = self._binding_lookup.get((code, ctrl, shift))
         repeat = bool(Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventAutorepeat))
 
-        if action == "move_left":
-            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(-1, 0, repeat, self._dragging))
+        if action:
+            # If any action is triggered, hide the cheat sheet if it's up
+            if self._cheat_sheet.is_visible() and action != "toggle_cheat_sheet":
+                AppHelper.callAfter(self._cheat_sheet.hide)
+
+            if action == "move_left":
+                AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(-1, 0, repeat, self._dragging))
+            elif action == "move_down":
+                AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(0, 1, repeat, self._dragging))
+            elif action == "move_up":
+                AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(0, -1, repeat, self._dragging))
+            elif action == "move_right":
+                AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(1, 0, repeat, self._dragging))
+            elif action == "scroll_up":
+                AppHelper.callAfter(lambda: self.scroll(3))
+            elif action == "scroll_down":
+                AppHelper.callAfter(lambda: self.scroll(-3))
+            elif action == "back":
+                AppHelper.callAfter(self.mouse_back)
+            elif action == "forward":
+                AppHelper.callAfter(self.mouse_forward)
+            elif action == "click":
+                AppHelper.callAfter(self.click_at_cursor)
+            elif action == "right_click":
+                AppHelper.callAfter(self.right_click_at_cursor)
+            elif action == "toggle_drag":
+                AppHelper.callAfter(self.toggle_drag)
+            elif action == "insert_mode":
+                AppHelper.callAfter(self.enter_insert_mode)
+            elif action == "toggle_hints" or action == "toggle_all_hints":
+                AppHelper.callAfter(self.toggle_all_hints)
+            elif action == "toggle_cheat_sheet":
+                sections = self._get_cheat_sheet_sections()
+                AppHelper.callAfter(lambda: self._cheat_sheet.toggle(sections))
+            elif action == "open_launcher":
+                AppHelper.callAfter(self._open_launcher)
+            elif action == "window_prefix":
+                self._window_cmd_pending = True
+                AppHelper.callAfter(lambda: self._watermark.set_mode("WINDOW"))
             return None
-        elif action == "move_down":
-            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(0, 1, repeat, self._dragging))
+
+        # No binding matched.
+        if self._cheat_sheet.is_visible():
+            AppHelper.callAfter(self._cheat_sheet.hide)
             return None
-        elif action == "move_up":
-            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(0, -1, repeat, self._dragging))
-            return None
-        elif action == "move_right":
-            AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(1, 0, repeat, self._dragging))
-            return None
-        elif action == "scroll_up":
-            AppHelper.callAfter(lambda: self.scroll(3))
-            return None
-        elif action == "scroll_down":
-            AppHelper.callAfter(lambda: self.scroll(-3))
-            return None
-        elif action == "back":
-            AppHelper.callAfter(self.mouse_back)
-            return None
-        elif action == "forward":
-            AppHelper.callAfter(self.mouse_forward)
-            return None
-        elif action == "click":
-            AppHelper.callAfter(self.click_at_cursor)
-            return None
-        elif action == "right_click":
-            AppHelper.callAfter(self.right_click_at_cursor)
-            return None
-        elif action == "toggle_drag":
-            AppHelper.callAfter(self.toggle_drag)
-            return None
-        elif action == "insert_mode":
-            AppHelper.callAfter(self.enter_insert_mode)
-            return None
-        elif action == "toggle_hints":
-            AppHelper.callAfter(self.toggle_hints)
-            return None
-        elif action == "toggle_all_hints":
-            AppHelper.callAfter(self.toggle_all_hints)
-            return None
-        elif action == "open_launcher":
-            AppHelper.callAfter(self._open_launcher)
-            return None
-        elif action == "window_prefix":
-            self._window_cmd_pending = True
-            AppHelper.callAfter(lambda: self._watermark.set_mode("WINDOW"))
-            return None
-        elif code in _KEYCODE_TO_CHAR:
+
+        if code in _KEYCODE_TO_CHAR:
             if self._hints_visible:
                 char = _KEYCODE_TO_CHAR[code].upper()
                 AppHelper.callAfter(lambda c=char: self.type_char(c))
@@ -341,6 +377,12 @@ class HintOverlay:
 
     def reset_typing(self):
         """Reset currently typed hint characters and show all labels. If none typed, dismiss hints."""
+        if self._cheat_sheet.is_visible():
+            AppHelper.callAfter(self._cheat_sheet.hide)
+            # If we were just hiding the cheat sheet, don't dismiss hints too on first Esc
+            if not self.typed:
+                return
+
         if not self._hints_visible:
             self.typed = ""
             return

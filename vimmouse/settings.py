@@ -26,34 +26,6 @@ from . import config
 from . import hotkey
 from .hotkey import MODIFIER_MASK
 
-# Map modifier flag bits to display symbols
-_MODIFIER_SYMBOLS = [
-    (Quartz.kCGEventFlagMaskControl, "\u2303"),   # ⌃
-    (Quartz.kCGEventFlagMaskAlternate, "\u2325"),  # ⌥
-    (Quartz.kCGEventFlagMaskShift, "\u21e7"),      # ⇧
-    (Quartz.kCGEventFlagMaskCommand, "\u2318"),    # ⌘
-]
-
-# Map keycodes to display names (common keys)
-_KEYCODE_NAMES = {
-    49: "Space", 36: "Return", 48: "Tab", 51: "Delete", 53: "Escape",
-    123: "\u2190", 124: "\u2192", 125: "\u2193", 126: "\u2191",  # arrows
-    # F-keys
-    122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6",
-    98: "F7", 100: "F8", 101: "F9", 109: "F10", 103: "F11", 111: "F12",
-}
-# Letters (keycodes 0-50ish map to QWERTY layout)
-_KEYCODE_LETTERS = {
-    0: "A", 1: "S", 2: "D", 3: "F", 4: "H", 5: "G", 6: "Z", 7: "X",
-    8: "C", 9: "V", 11: "B", 12: "Q", 13: "W", 14: "E", 15: "R",
-    16: "Y", 17: "T", 18: "1", 19: "2", 20: "3", 21: "4", 22: "6",
-    23: "5", 24: "=", 25: "9", 26: "7", 27: "-", 28: "8", 29: "0",
-    30: "]", 31: "O", 32: "U", 33: "[", 34: "I", 35: "P", 37: "L",
-    38: "J", 39: "'", 40: "K", 41: ";", 42: "\\", 43: ",", 44: "/",
-    45: "N", 46: "M", 47: ".", 50: "`",
-}
-_KEYCODE_NAMES.update(_KEYCODE_LETTERS)
-
 # Human-readable labels for keybinding actions
 _ACTION_LABELS = {
     "move_left": "Mouse Left",
@@ -62,7 +34,8 @@ _ACTION_LABELS = {
     "move_right": "Mouse Right",
     "scroll_up": "Scroll Up",
     "scroll_down": "Scroll Down",
-    "toggle_hints": "Toggle Hints",
+    "toggle_all_hints": "Toggle Hints",
+    "toggle_cheat_sheet": "Cheat Sheet",
     "click": "Click",
     "insert_mode": "Insert Mode",
     "forward": "Forward",
@@ -89,25 +62,6 @@ _ACTION_LABELS = {
     "win_center": "Win: Center",
     "win_maximize": "Win: Maximize",
 }
-
-
-def _format_hotkey(keycode, flags):
-    """Return a human-readable string like '⌘⇧Space'."""
-    parts = [sym for mask, sym in _MODIFIER_SYMBOLS if flags & mask]
-    parts.append(_KEYCODE_NAMES.get(keycode, f"Key{keycode}"))
-    return "".join(parts)
-
-
-def _format_binding(spec):
-    """Format a keybinding spec (or list of specs) for display."""
-    if isinstance(spec, list):
-        return " / ".join(_format_binding(s) for s in spec)
-    keycode = spec["keycode"]
-    ctrl = spec.get("ctrl", False)
-    shift = spec.get("shift", False)
-    name = _KEYCODE_NAMES.get(keycode, f"Key{keycode}")
-    prefix = ("\u2303" if ctrl else "") + ("\u21e7" if shift else "")
-    return f"{prefix}{name}"
 
 
 class HotkeyRecorderField(NSTextField):
@@ -145,7 +99,7 @@ class HotkeyRecorderField(NSTextField):
             field._keycode = keycode
             field._flags = flags
             field._stopRecording()
-            field.setStringValue_(_format_hotkey(keycode, flags))
+            field.setStringValue_(config.format_hotkey(keycode, flags))
             return None
 
         self._monitor = NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
@@ -197,9 +151,8 @@ class KeyRecorderField(NSTextField):
             field._ctrl = ctrl
             field._shift = shift
             field._stopRecording()
-            name = _KEYCODE_NAMES.get(keycode, f"Key{keycode}")
-            prefix = ("\u2303" if ctrl else "") + ("\u21e7" if shift else "")
-            field.setStringValue_(f"{prefix}{name}")
+            spec = {"keycode": keycode, "ctrl": ctrl, "shift": shift}
+            field.setStringValue_(config.format_binding(spec))
             return None
 
         self._monitor = NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
@@ -277,7 +230,7 @@ class SettingsController(NSObject):
             NSMakeRect(160, y, 185, 20)
         )
         keycode, flags = hotkey.get_hotkey()
-        recorder.setStringValue_(_format_hotkey(keycode, flags))
+        recorder.setStringValue_(config.format_hotkey(keycode, flags))
         recorder.setFont_(NSFont.systemFontOfSize_(13))
         content.addSubview_(recorder)
         self._recorder = recorder
@@ -347,7 +300,7 @@ class SettingsController(NSObject):
         rec._keycode = spec["keycode"]
         rec._ctrl = spec.get("ctrl", False)
         rec._shift = spec.get("shift", False)
-        rec.setStringValue_(_format_binding(spec))
+        rec.setStringValue_(config.format_binding(spec))
         return rec
 
     def _rebuild_binding_rows(self):
@@ -415,7 +368,7 @@ class SettingsController(NSObject):
     def _refresh_values(self):
         """Refresh displayed values from current config."""
         keycode, flags = hotkey.get_hotkey()
-        self._recorder.setStringValue_(_format_hotkey(keycode, flags))
+        self._recorder.setStringValue_(config.format_hotkey(keycode, flags))
         self._recorder._keycode = None
         self._recorder._flags = 0
         bindings = config.load_keybindings()
