@@ -159,28 +159,23 @@ def _collect_clickable(root):
             continue
 
         role = _get_attr(element, "AXRole")
-        is_clickable = _is_clickable(role, element) if role else False
+        is_direct = _is_clickable(role, element) if role else False
         
         # Determine if we should consider this element as a candidate
-        # 1. It is directly clickable
-        # 2. It's a child of a clickable element and might be the one providing the size
-        effective_clickable = is_clickable or (clickable_ancestor is not None)
+        effective_clickable = is_direct or (clickable_ancestor is not None)
 
         if role and effective_clickable:
-            # We used to check AXIsOffScreen here, but it's unreliable in Chrome.
-            # We filter by window bounds and occlusion later anyway.
             position = _get_attr(element, "AXPosition")
             size = _get_attr(element, "AXSize")
             if position is not None and size is not None:
                 results.append({"element": element, "role": role,
                                 "position": position, "size": size,
-                                "is_direct": is_clickable})
+                                "is_direct": is_direct})
 
         # Traverse children
-        # Prefer AXChildren over AXVisibleChildren as the latter can be too aggressive in pruning.
         children = _get_attr(element, "AXChildren")
         if children:
-            new_ancestor = element if is_clickable else clickable_ancestor
+            new_ancestor = element if is_direct else clickable_ancestor
             for child in reversed(children):
                 stack.append((child, new_ancestor))
     return results
@@ -270,9 +265,6 @@ def get_clickable_elements(pid):
     win_list = _get_on_screen_windows()
 
     visible = []
-    # Deduplicate elements by position/size to avoid double-hinting
-    seen_rects = set()
-
     for el in candidates:
         ex, ey, ew, eh = _element_rect(el["position"], el["size"])
         
@@ -285,20 +277,38 @@ def get_clickable_elements(pid):
                 and ey + eh > by and ey < by + bh):
             continue
 
-        # Deduplication: if we've already seen an element with almost exactly this rect,
-        # it's likely a child/parent pair representing the same clickable area.
-        rect_key = (int(ex), int(ey), int(ew), int(eh))
-        if rect_key in seen_rects:
-            continue
-        seen_rects.add(rect_key)
-
         # Check occlusion by other windows (slower)
         if _is_element_covered(ex, ey, ew, eh, pid, win_list):
             continue
 
         visible.append(_enrich_element(el))
 
-    return visible
+    # Spatial Deduplication: pick the best element if multiple share nearly the same center.
+    # Prioritize: is_direct > role in ALWAYS_CLICKABLE > larger area
+    visible.sort(key=lambda x: (
+        not x.get("is_direct", False),
+        x["role"] not in ALWAYS_CLICKABLE,
+        - (float(_get_attr(x["element"], "AXSize").width if _get_attr(x["element"], "AXSize") else 0) * 
+           float(_get_attr(x["element"], "AXSize").height if _get_attr(x["element"], "AXSize") else 0))
+    ))
+    
+    final_visible = []
+    seen_centers = []
+    
+    for el in visible:
+        ex, ey, ew, eh = _element_rect(el["position"], el["size"])
+        cx, cy = ex + ew / 2, ey + eh / 2
+        
+        is_dup = False
+        for scx, scy in seen_centers:
+            if abs(cx - scx) < 10 and abs(cy - scy) < 10:
+                is_dup = True
+                break
+        if not is_dup:
+            final_visible.append(el)
+            seen_centers.append((cx, cy))
+
+    return final_visible
 
 
 def get_all_clickable_elements(pid_bounds_map):
@@ -310,7 +320,7 @@ def get_all_clickable_elements(pid_bounds_map):
         app_ref = AXUIElementCreateApplication(pid)
         candidates = _collect_clickable(app_ref)
         
-        seen_rects = set()
+        visible = []
         for el in candidates:
             ex, ey, ew, eh = _element_rect(el["position"], el["size"])
             if ew < 4 or eh < 4:
@@ -327,16 +337,32 @@ def get_all_clickable_elements(pid_bounds_map):
             if not in_any_bounds:
                 continue
 
-            rect_key = (int(ex), int(ey), int(ew), int(eh))
-            if rect_key in seen_rects:
-                continue
-            seen_rects.add(rect_key)
-
             # Check occlusion
             if _is_element_covered(ex, ey, ew, eh, pid, win_list):
                 continue
 
-            all_elements.append(_enrich_element(el))
+            visible.append(_enrich_element(el))
+            
+        # Spatial Deduplication
+        visible.sort(key=lambda x: (
+            not x.get("is_direct", False),
+            x["role"] not in ALWAYS_CLICKABLE
+        ))
+        
+        seen_centers = []
+        for el in visible:
+            ex, ey, ew, eh = _element_rect(el["position"], el["size"])
+            cx, cy = ex + ew / 2, ey + eh / 2
+            
+            is_dup = False
+            for scx, scy in seen_centers:
+                if abs(cx - scx) < 10 and abs(cy - scy) < 10:
+                    is_dup = True
+                    break
+            if not is_dup:
+                all_elements.append(el)
+                seen_centers.append((cx, cy))
+                
     return all_elements
 
 
