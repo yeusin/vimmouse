@@ -214,7 +214,7 @@ class SettingsController(NSObject):
             NSBackingStoreBuffered,
             False,
         )
-        w.setTitle_("VimMouse Settings")
+        w.setTitle_("VimLayer Settings")
         w.setReleasedWhenClosed_(False)
         w.setDelegate_(self)
         w.center()

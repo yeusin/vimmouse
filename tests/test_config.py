@@ -1,6 +1,6 @@
 import json
 import os
-from vimmouse import config
+from vimlayer import config
 
 def test_default_keybindings():
     bindings = config.default_keybindings()

@@ -1,4 +1,4 @@
-"""Reusable UI components for VimMouse."""
+"""Reusable UI components for VimLayer."""
 
 import objc
 from AppKit import (
@@ -167,7 +167,7 @@ class CheatSheetView(NSView):
     def _setup_ui(self):
         y = self.frame().size.height - _CS_PAD
         
-        title = make_label("VimMouse Shortcuts", _CS_TITLE_SIZE, None, _CS_TEXT_COLOR, draw_bg=False)
+        title = make_label("VimLayer Shortcuts", _CS_TITLE_SIZE, None, _CS_TEXT_COLOR, draw_bg=False)
         title.setFrameOrigin_((_CS_PAD, y - title.frame().size.height))
         self.addSubview_(title)
         y -= title.frame().size.height + 25

@@ -26,20 +26,20 @@ if os.path.exists("pyproject.toml"):
     os.rename("pyproject.toml", "_pyproject.toml")
     atexit.register(lambda: os.rename("_pyproject.toml", "pyproject.toml") if os.path.exists("_pyproject.toml") else None)
 
-version = os.environ.get("VIMMOUSE_VERSION", "dev")
+version = os.environ.get("VIMLAYER_VERSION", "dev")
 
 setup(
-    app=["vimmouse/main.py"],
+    app=["vimlayer/main.py"],
     options={
         "py2app": {
             "argv_emulation": False,
             "plist": {
-                "CFBundleName": "VimMouse",
-                "CFBundleIdentifier": "com.vimmouse.app",
+                "CFBundleName": "VimLayer",
+                "CFBundleIdentifier": "com.vimlayer.app",
                 "CFBundleVersion": version,
                 "CFBundleShortVersionString": version,
                 "LSUIElement": True,
-                "NSAccessibilityUsageDescription": "VimMouse needs Accessibility access to detect UI elements and simulate clicks.",
+                "NSAccessibilityUsageDescription": "VimLayer needs Accessibility access to detect UI elements and simulate clicks.",
             },
             "packages": [
                 "objc",

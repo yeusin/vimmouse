@@ -1,8 +1,8 @@
-# VimMouse
+# VimLayer
 
 A macOS utility that brings Vim-style keyboard navigation to your mouse. Navigate and click UI elements across any application using keyboard shortcuts inspired by [Vimium](https://vimium.github.io/).
 
-VimMouse overlays hint labels on clickable elements (buttons, links, text fields, menus) and lets you activate them by typing their hint characters — no mouse needed.
+VimLayer overlays hint labels on clickable elements (buttons, links, text fields, menus) and lets you activate them by typing their hint characters — no mouse needed.
 
 ## Key Features
 
@@ -15,7 +15,7 @@ VimMouse overlays hint labels on clickable elements (buttons, links, text fields
 - **Fully customizable keybindings** — Remap every action via Settings UI
 - **Cmd+key passthrough** — Standard macOS shortcuts (Cmd+W, Cmd+Tab, etc.) work as expected
 - **Launch at Login** — Start automatically via macOS ServiceManagement
-- **Status bar indicator** — Shows current mode (VM:N / VM:I)
+- **Status bar indicator** — Shows current mode (VL:N / VL:I)
 - **Auto-insert mode** — Intelligently switches to Insert mode when a text field is focused and back to Normal mode when focus is lost.
 
 ## Installation
@@ -23,7 +23,7 @@ VimMouse overlays hint labels on clickable elements (buttons, links, text fields
 Requires Python 3.13+, macOS, and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv run python -m vimmouse.main
+uv run python -m vimlayer.main
 ```
 
 ### Build macOS App Bundle
@@ -32,17 +32,17 @@ uv run python -m vimmouse.main
 uv run --group dev python setup.py py2app
 ```
 
-The app bundle will be created in `dist/VimMouse.app`.
+The app bundle will be created in `dist/VimLayer.app`.
 
 ### Accessibility Permission
 
-VimMouse requires Accessibility access to detect UI elements and intercept the global hotkey. On first launch, macOS will prompt you to grant permission in **System Settings > Privacy & Security > Accessibility**.
+VimLayer requires Accessibility access to detect UI elements and intercept the global hotkey. On first launch, macOS will prompt you to grant permission in **System Settings > Privacy & Security > Accessibility**.
 
 ## Usage
 
 ### Activation
 
-VimMouse enters Normal mode immediately on launch. Press **Cmd+Shift+Space** (default) to return to Normal mode from Insert mode.
+VimLayer enters Normal mode immediately on launch. Press **Cmd+Shift+Space** (default) to return to Normal mode from Insert mode.
 
 ### Modes
 
@@ -97,9 +97,9 @@ Holding HJKL keys accelerates the cursor from 10px to 100px per step using an ea
 
 ## Configuration
 
-Settings are stored in `~/.config/vimmouse/config.json`.
+Settings are stored in `~/.config/vimlayer/config.json`.
 
-Open Settings from the **VM** status bar menu to:
+Open Settings from the **VL** status bar menu to:
 
 - Record a new activation hotkey (must include a modifier key)
 - Customize keybindings for all actions (up to 4 keys per action)
@@ -129,7 +129,7 @@ Example config:
 ```
 ├── pyproject.toml          # Project metadata and dependencies
 ├── setup.py                # py2app build config
-└── vimmouse/
+└── vimlayer/
     ├── main.py             # Entry point, status bar, app lifecycle
     ├── hint_overlay.py     # Overlay window, hints, keyboard handling
     ├── accessibility.py    # AX tree traversal, element detection

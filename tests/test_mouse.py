@@ -1,10 +1,10 @@
 import pytest
-from vimmouse.mouse import MouseController
+from vimlayer.mouse import MouseController
 
 def test_mouse_acceleration_reset(mocker):
     # Mock Quartz calls
-    mocker.patch("vimmouse.mouse.get_cursor_position", return_value=(100, 100))
-    mock_move = mocker.patch("vimmouse.mouse.move_cursor")
+    mocker.patch("vimlayer.mouse.get_cursor_position", return_value=(100, 100))
+    mock_move = mocker.patch("vimlayer.mouse.move_cursor")
     
     ctrl = MouseController()
     
@@ -19,8 +19,8 @@ def test_mouse_acceleration_reset(mocker):
     assert ctrl._mouse_repeat_count == 0
 
 def test_mouse_acceleration_ramp(mocker):
-    mocker.patch("vimmouse.mouse.get_cursor_position", return_value=(100, 100))
-    mock_move = mocker.patch("vimmouse.mouse.move_cursor")
+    mocker.patch("vimlayer.mouse.get_cursor_position", return_value=(100, 100))
+    mock_move = mocker.patch("vimlayer.mouse.move_cursor")
     
     ctrl = MouseController()
     

@@ -2756,7 +2756,7 @@ wheels = [
 ]
 
 [[package]]
-name = "vimmouse"
+name = "vimlayer"
 version = "0.0.0"
 source = { virtual = "." }
 dependencies = [

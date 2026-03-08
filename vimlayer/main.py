@@ -1,4 +1,4 @@
-"""VimMouse - Spotlight-like UI element search and click for macOS."""
+"""VimLayer - Spotlight-like UI element search and click for macOS."""
 
 import os
 import sys
@@ -36,10 +36,10 @@ objc.loadBundle(
     "/System/Library/Frameworks/ServiceManagement.framework",
 )
 
-from vimmouse import config
-from vimmouse import hotkey
-from vimmouse import hint_overlay
-from vimmouse.settings import SettingsController
+from vimlayer import config
+from vimlayer import hotkey
+from vimlayer import hint_overlay
+from vimlayer.settings import SettingsController
 
 
 class StatusBarController(NSObject):
@@ -53,7 +53,7 @@ class StatusBarController(NSObject):
         self._status_item = status_bar.statusItemWithLength_(
             NSVariableStatusItemLength
         )
-        self._status_item.setTitle_("VM")
+        self._status_item.setTitle_("VL")
 
         menu = NSMenu.alloc().init()
         settings_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
@@ -142,9 +142,9 @@ def main():
 
     def on_mode_change(mode):
         if mode:
-            status_bar_ctrl._status_item.setTitle_(f"VM:{mode}")
+            status_bar_ctrl._status_item.setTitle_(f"VL:{mode}")
         else:
-            status_bar_ctrl._status_item.setTitle_("VM")
+            status_bar_ctrl._status_item.setTitle_("VL")
 
     overlay = hint_overlay.HintOverlay(on_mode_change=on_mode_change)
     status_bar_ctrl._settings_ctrl._overlay = overlay
@@ -161,7 +161,7 @@ def main():
 
     signal.signal(signal.SIGINT, lambda *_: AppHelper.stopEventLoop())
 
-    logging.getLogger(__name__).info("VimMouse running")
+    logging.getLogger(__name__).info("VimLayer running")
     AppHelper.runEventLoop()
 
 

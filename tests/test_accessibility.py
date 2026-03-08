@@ -1,5 +1,5 @@
 import pytest
-from vimmouse import accessibility
+from vimlayer import accessibility
 
 def test_subsequence_match():
     assert accessibility._subsequence_match("abc", "apple banana cherry")
@@ -51,7 +51,7 @@ def test_is_input_element_new_roles():
             return 0, getattr(el, "_subrole", None)
         return -1, None
 
-    import vimmouse.accessibility as acc
+    import vimlayer.accessibility as acc
     # Temporarily monkeypatch
     original = acc.AXUIElementCopyAttributeValue
     acc.AXUIElementCopyAttributeValue = get_attr
@@ -81,8 +81,8 @@ def test_is_input_element_new_roles():
         acc.AXUIElementCopyAttributeValue = original
 
 def test_get_focused_element(mocker):
-    mock_sw = mocker.patch("vimmouse.accessibility.AXUIElementCreateSystemWide")
-    mock_copy = mocker.patch("vimmouse.accessibility.AXUIElementCopyAttributeValue")
+    mock_sw = mocker.patch("vimlayer.accessibility.AXUIElementCreateSystemWide")
+    mock_copy = mocker.patch("vimlayer.accessibility.AXUIElementCopyAttributeValue")
     
     mock_copy.return_value = (0, "mock_element")
     

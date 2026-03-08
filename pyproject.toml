@@ -1,5 +1,5 @@
 [project]
-name = "vimmouse"
+name = "vimlayer"
 version = "0.0.0"
 description = "Vim-style UI element navigation for macOS"
 requires-python = ">=3.13"
@@ -23,13 +23,13 @@ dev = [
 line-length = 100
 
 [tool.ruff.lint.per-file-ignores]
-"vimmouse/main.py" = ["E402"]
+"vimlayer/main.py" = ["E402"]
 
 [project.scripts]
-vimmouse = "vimmouse.main:main"
+vimlayer = "vimlayer.main:main"
 
 [tool.py2app]
-app = ["vimmouse/main.py"]
+app = ["vimlayer/main.py"]
 argv_emulation = false
 packages = [
     "objc",
@@ -44,9 +44,9 @@ packages = [
 ]
 
 [tool.py2app.plist]
-CFBundleName = "VimMouse"
-CFBundleIdentifier = "com.vimmouse.app"
+CFBundleName = "VimLayer"
+CFBundleIdentifier = "com.vimlayer.app"
 CFBundleVersion = "0.0.0"
 CFBundleShortVersionString = "0.0.0"
 LSUIElement = true
-NSAccessibilityUsageDescription = "VimMouse needs Accessibility access to detect UI elements and simulate clicks."
+NSAccessibilityUsageDescription = "VimLayer needs Accessibility access to detect UI elements and simulate clicks."

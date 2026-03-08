@@ -1,4 +1,4 @@
-name: Build VimMouse.app
+name: Build VimLayer.app
 
 on:
   push:
@@ -15,7 +15,7 @@ jobs:
 
       - name: Set version from tag
         if: startsWith(github.ref, 'refs/tags/v')
-        run: echo "VIMMOUSE_VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_ENV"
+        run: echo "VIMLAYER_VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: uv sync --group dev
@@ -23,19 +23,19 @@ jobs:
       - name: Build .app bundle
         run: uv run python setup.py py2app
 
-      - name: Upload VimMouse.app
+      - name: Upload VimLayer.app
         uses: actions/upload-artifact@v4
         with:
-          name: VimMouse.app
-          path: dist/VimMouse.app
+          name: VimLayer.app
+          path: dist/VimLayer.app
 
       - name: Zip app for release
         if: startsWith(github.ref, 'refs/tags/v')
-        run: cd dist && zip -r "VimMouse-${VIMMOUSE_VERSION}.app.zip" VimMouse.app
+        run: cd dist && zip -r "VimLayer-${VIMLAYER_VERSION}.app.zip" VimLayer.app
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/VimMouse-${{ env.VIMMOUSE_VERSION }}.app.zip
+          files: dist/VimLayer-${{ env.VIMLAYER_VERSION }}.app.zip
           generate_release_notes: true

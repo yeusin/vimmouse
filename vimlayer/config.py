@@ -6,7 +6,7 @@ from typing import Any, Dict, Union, List
 
 import Quartz
 
-_CONFIG_PATH = os.path.expanduser("~/.config/vimmouse/config.json")
+_CONFIG_PATH = os.path.expanduser("~/.config/vimlayer/config.json")
 
 _DEFAULTS: Dict[str, Any] = {
     "keycode": 49,  # Space

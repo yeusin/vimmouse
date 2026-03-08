@@ -1,17 +1,17 @@
 import pytest
 from unittest.mock import MagicMock
 import Quartz
-from vimmouse.hint_overlay import HintOverlay
+from vimlayer.hint_overlay import HintOverlay
 
 @pytest.fixture
 def overlay(mocker):
-    mocker.patch("vimmouse.hint_overlay.MouseController")
-    mocker.patch("vimmouse.hint_overlay.WatermarkManager")
-    mock_cs = mocker.patch("vimmouse.hint_overlay.CheatSheetOverlay").return_value
+    mocker.patch("vimlayer.hint_overlay.MouseController")
+    mocker.patch("vimlayer.hint_overlay.WatermarkManager")
+    mock_cs = mocker.patch("vimlayer.hint_overlay.CheatSheetOverlay").return_value
     mock_cs.is_visible.return_value = False
-    mocker.patch("vimmouse.hint_overlay.WindowManager")
-    mocker.patch("vimmouse.hint_overlay.Launcher")
-    mocker.patch("vimmouse.config.load_keybindings", return_value={})
+    mocker.patch("vimlayer.hint_overlay.WindowManager")
+    mocker.patch("vimlayer.hint_overlay.Launcher")
+    mocker.patch("vimlayer.config.load_keybindings", return_value={})
     return HintOverlay()
 
 def test_block_arrow_keys(overlay, mocker):
