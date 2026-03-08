@@ -420,18 +420,19 @@ class HintOverlay:
         # Block Escape and reset typing or drag
         if code == _KEY_ESCAPE:
             AppHelper.callAfter(self._watermark.hide)
-            if self._dragging:
-                AppHelper.callAfter(self.toggle_drag)
-            else:
+            AppHelper.callAfter(self.cancel_drag)
+            if not self._dragging:
                 AppHelper.callAfter(self.reset_typing)
             return None
 
         if code == _KEY_BACKSPACE:
+            AppHelper.callAfter(self.cancel_drag)
             AppHelper.callAfter(self.backspace)
             return None
 
         # Handle pending window command (ctrl+w was pressed previously)
         if self._window_cmd_pending:
+            AppHelper.callAfter(self.cancel_drag)
             win_action = self._window_binding_lookup.get((code, ctrl))
             
             # Special case for win_cycle: exit prefix state immediately to require prefix for next command,
@@ -478,6 +479,10 @@ class HintOverlay:
             # If any action is triggered, hide the cheat sheet if it's up
             if self._cheat_sheet.is_visible() and action != "toggle_cheat_sheet":
                 AppHelper.callAfter(self._cheat_sheet.hide)
+
+            # Auto-cancel drag for non-movement actions
+            if action not in ("move_left", "move_down", "move_up", "move_right", "toggle_drag"):
+                AppHelper.callAfter(self.cancel_drag)
 
             if action == "move_left":
                 AppHelper.callAfter(lambda: self._mouse_ctrl.move_relative(-1, 0, repeat, self._dragging))
@@ -527,6 +532,8 @@ class HintOverlay:
         is_char = code in _KEYCODE_TO_CHAR
         
         if is_nav or is_char:
+            AppHelper.callAfter(self.cancel_drag)
+
             if is_char and self._hints_visible:
                 char = _KEYCODE_TO_CHAR[code].upper()
                 # Hint chars are letters only. Non-alpha keys (space/tab/return) still show overlay if not bound.
@@ -789,6 +796,11 @@ class HintOverlay:
         x, y = mouse.get_cursor_position()
         log.info("click: cursor (%.0f, %.0f)", x, y)
         self._click_and_dismiss(x, y)
+
+    def cancel_drag(self):
+        """End mouse drag if active."""
+        if self._dragging:
+            self.toggle_drag()
 
     def toggle_drag(self):
         """Toggle mouse drag: first call presses mouse down, second releases."""
