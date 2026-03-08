@@ -432,13 +432,19 @@ class HintOverlay:
         if self._window_cmd_pending:
             win_action = self._window_binding_lookup.get((code, ctrl))
             
-            # Special case for win_cycle: keep window mode active so user can cycle repeatedly
+            # Special case for win_cycle: exit window mode after cycling but keep watermark visible
             if win_action == "win_cycle":
                 handler = _WINDOW_ACTIONS.get(win_action)
                 if handler:
                     AppHelper.callAfter(handler(self))
                     # Reset/refresh watermark timer
                     AppHelper.callAfter(self._watermark.flash)
+                
+                self._window_cmd_pending = False
+                if self._dragging:
+                    self._notify_mode("D")
+                else:
+                    self._notify_mode("N")
                 return None
 
             # Check if this key is the window prefix itself (e.g. ctrl+w ctrl+w)
