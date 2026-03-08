@@ -66,8 +66,12 @@ stateDiagram-v2
 
 ### 4. NORMAL → WINDOW (Prefix Mode)
 *   **Trigger**: Pressing `Ctrl+W` enters a transient prefix state.
-*   **Behavior**: The watermark changes to "WINDOW". The system waits for a second key to perform a window management action (e.g., tiling, centering, cycling).
-*   **Exit**: Returns to NORMAL mode immediately after any action is performed (including cycling), or after a 5-second timeout. This ensures that every window command requires the prefix (`Ctrl+W`) again. Note that after cycling, the "WINDOW" watermark may remain visible to indicate a window session is active, even though the prefix must be re-pressed.
+*   **Behavior**: The watermark changes to "WINDOW" and the status bar shows `VL:W`. The system waits for a second key to perform a window management action (e.g., tiling, centering, cycling).
+*   **Auto-Insert Suppression**: While the "WINDOW" watermark is visible (or while a prefix is pending), **Auto-Insert mode is strictly suppressed** to prevent interruptions during window management.
+*   **Exit**:
+    *   **Tiling/Other Actions**: Returns to NORMAL mode immediately after the action is performed. The watermark is hidden.
+    *   **Cycling (`Ctrl+W Ctrl+W`)**: The prefix state is cleared (requiring another `Ctrl+W` for the next action), but the status remains `VL:W` and the "WINDOW" watermark stays visible until it times out. This allows for rapid cycling while maintaining visual feedback and suppressing auto-insert.
+    *   **Timeout**: If no keys are pressed for 5 seconds, the watermark disappears and the system returns to NORMAL mode.
 
 ### 5. NORMAL → DRAG
 *   **Trigger**: Pressing `v` toggles mouse dragging.

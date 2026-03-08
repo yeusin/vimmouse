@@ -193,6 +193,7 @@ class HintOverlay:
         self._cycle_idx = -1
         self._cycle_gen = 0
         self._window_cmd_pending = False
+        self._window_watermark_active = False
         self._is_polling = False
         self._launcher = Launcher(on_dismiss=self._on_launcher_dismiss)
         self.reload_keybindings()
@@ -247,6 +248,7 @@ class HintOverlay:
         """Called when the watermark disappears."""
         if mode == "WINDOW":
             self._window_cmd_pending = False
+            self._window_watermark_active = False
             if self._dragging:
                 self._notify_mode("D")
             else:
@@ -338,8 +340,8 @@ class HintOverlay:
         if not self.window or not self._auto_insert_enabled:
             return
 
-        # Suppress auto-insert while window mode (prefix state) is active
-        if self._window_cmd_pending:
+        # Suppress auto-insert while window mode (prefix state or watermark) is active
+        if self._window_cmd_pending or self._window_watermark_active:
             return
 
         if element is None:
@@ -432,7 +434,8 @@ class HintOverlay:
         if self._window_cmd_pending:
             win_action = self._window_binding_lookup.get((code, ctrl))
             
-            # Special case for win_cycle: exit window mode after cycling but keep watermark visible
+            # Special case for win_cycle: exit prefix state immediately to require prefix for next command,
+            # but keep the mode as 'W' until the watermark disappears.
             if win_action == "win_cycle":
                 handler = _WINDOW_ACTIONS.get(win_action)
                 if handler:
@@ -441,10 +444,7 @@ class HintOverlay:
                     AppHelper.callAfter(self._watermark.flash)
                 
                 self._window_cmd_pending = False
-                if self._dragging:
-                    self._notify_mode("D")
-                else:
-                    self._notify_mode("N")
+                # We do NOT call self._notify_mode here; it will be called in _on_watermark_hide
                 return None
 
             # Check if this key is the window prefix itself (e.g. ctrl+w ctrl+w)
@@ -457,6 +457,7 @@ class HintOverlay:
 
             # For all other keys (matched or unmatched), deactivate window mode
             self._window_cmd_pending = False
+            self._window_watermark_active = False
             if self._dragging:
                 self._notify_mode("D")
             else:
@@ -511,6 +512,7 @@ class HintOverlay:
                 AppHelper.callAfter(self._open_launcher)
             elif action == "window_prefix":
                 self._window_cmd_pending = True
+                self._window_watermark_active = True
                 self._notify_mode("W")
                 AppHelper.callAfter(lambda: self._watermark.set_mode("WINDOW"))
             return None
