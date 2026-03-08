@@ -80,6 +80,42 @@ def test_is_input_element_new_roles():
     finally:
         acc.AXUIElementCopyAttributeValue = original
 
+def test_is_element_covered(mocker):
+    # Mock Quartz.CGWindowListCopyWindowInfo and other functions
+    mocker.patch("os.getpid", return_value=999)
+    
+    # win_list front-to-back:
+    # 0: App PID 100, Window ID 1, bounds (0,0,500,500)
+    # 1: App PID 100, Window ID 2, bounds (0,0,500,500)
+    win_list = [
+        {"kCGWindowOwnerPID": 100, "kCGWindowNumber": 1, "kCGWindowBounds": {"X":0, "Y":0, "Width":500, "Height":500}, "kCGWindowLayer": 0},
+        {"kCGWindowOwnerPID": 100, "kCGWindowNumber": 2, "kCGWindowBounds": {"X":0, "Y":0, "Width":500, "Height":500}, "kCGWindowLayer": 0},
+    ]
+
+    # Element at (250, 250), belonging to PID 100
+    ex, ey, ew, eh = 245, 245, 10, 10
+    pid = 100
+
+    # Case 1: Element is in Window 1 (Front). Should NOT be covered.
+    assert not accessibility._is_element_covered(ex, ey, ew, eh, pid, win_list, target_wid=1)
+
+    # Case 2: Element is in Window 2 (Back). Should BE covered by Window 1.
+    assert accessibility._is_element_covered(ex, ey, ew, eh, pid, win_list, target_wid=2)
+
+    # Case 3: Element is in Window 2, but Window 1 is a small overlay (< 50x50). Should NOT be covered.
+    win_list_small = [
+        {"kCGWindowOwnerPID": 100, "kCGWindowNumber": 1, "kCGWindowBounds": {"X":240, "Y":240, "Width":20, "Height":20}, "kCGWindowLayer": 0},
+        {"kCGWindowOwnerPID": 100, "kCGWindowNumber": 2, "kCGWindowBounds": {"X":0, "Y":0, "Width":500, "Height":500}, "kCGWindowLayer": 0},
+    ]
+    assert not accessibility._is_element_covered(ex, ey, ew, eh, pid, win_list_small, target_wid=2)
+
+    # Case 4: Element belongs to PID 100, but covered by another app PID 200.
+    win_list_other = [
+        {"kCGWindowOwnerPID": 200, "kCGWindowNumber": 3, "kCGWindowBounds": {"X":0, "Y":0, "Width":500, "Height":500}, "kCGWindowLayer": 0},
+        {"kCGWindowOwnerPID": 100, "kCGWindowNumber": 2, "kCGWindowBounds": {"X":0, "Y":0, "Width":500, "Height":500}, "kCGWindowLayer": 0},
+    ]
+    assert accessibility._is_element_covered(ex, ey, ew, eh, pid, win_list_other, target_wid=2)
+
 def test_get_focused_element(mocker):
     mock_sw = mocker.patch("vimlayer.accessibility.AXUIElementCreateSystemWide")
     mock_copy = mocker.patch("vimlayer.accessibility.AXUIElementCopyAttributeValue")

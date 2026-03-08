@@ -1,6 +1,7 @@
 """AX tree querying and element matching."""
 
 import os
+import objc
 from typing import Any, Dict, List, Optional, Tuple
 import Quartz
 from ApplicationServices import (
@@ -12,6 +13,29 @@ from ApplicationServices import (
     kAXValueCGPointType,
     kAXValueCGSizeType,
 )
+
+# Private API: _AXUIElementGetWindow(AXUIElementRef, CGWindowID *) -> AXError
+try:
+    _hi_bundle = objc.loadBundle(
+        "HIServices", {},
+        bundle_path="/System/Library/Frameworks/ApplicationServices.framework/"
+                    "Frameworks/HIServices.framework",
+    )
+    _fn = {}
+    objc.loadBundleFunctions(_hi_bundle, _fn, [("_AXUIElementGetWindow", b"l@o^I")])
+    _AXUIElementGetWindow = _fn["_AXUIElementGetWindow"]
+except (ImportError, KeyError, AttributeError):
+    _AXUIElementGetWindow = None
+
+
+def get_window_id(element: Any) -> Optional[int]:
+    """Get the CGWindowID of the window containing this element."""
+    if _AXUIElementGetWindow is None:
+        return None
+    err, wid = _AXUIElementGetWindow(element, None)
+    if err == 0:
+        return wid
+    return None
 
 # Semantic keyword → (AXRole, AXSubrole) or custom matcher
 SEMANTIC_MAP: Dict[str, Tuple[str, str]] = {
@@ -257,7 +281,7 @@ def _get_visible_bounds(pid: int) -> Optional[Tuple[float, float, float, float]]
     return _element_rect(pos, size)
 
 
-def _is_element_covered(ex: float, ey: float, ew: float, eh: float, pid: int, win_list: List[Dict[str, Any]]) -> bool:
+def _is_element_covered(ex: float, ey: float, ew: float, eh: float, pid: int, win_list: List[Dict[str, Any]], target_wid: Optional[int] = None) -> bool:
     """Check if the element's center point is covered by a window in front of it."""
     cx, cy = ex + ew / 2, ey + eh / 2
     my_pid = os.getpid()
@@ -273,14 +297,26 @@ def _is_element_covered(ex: float, ey: float, ew: float, eh: float, pid: int, wi
         if layer < 0:
             continue
 
+        w_id = w.get(Quartz.kCGWindowNumber, 0)
         b = w.get(Quartz.kCGWindowBounds, {})
         wx, wy, ww, wh = b.get("X", 0), b.get("Y", 0), b.get("Width", 0), b.get("Height", 0)
 
         # Check if this window contains the point
         if wx <= cx <= wx + ww and wy <= cy <= wy + wh:
             if w_pid == pid:
-                # Target app's window is in front. We assume it's the one we're interested in.
-                return False
+                if target_wid is not None:
+                    if w_id == target_wid:
+                        # Target app's same window is in front. We're on it.
+                        return False
+                    else:
+                        # Another window of target app is in front. Covered!
+                        # But skip very small windows (likely tooltips or overlays)
+                        if ww < 50 or wh < 50:
+                            continue
+                        return True
+                else:
+                    # Fallback: assume the first window of target app we hit is our target.
+                    return False
             else:
                 # Another app's window is in front. 
                 # Ignore very small windows (likely tooltips or overlays)
@@ -318,7 +354,8 @@ def get_clickable_elements(pid: int) -> List[Dict[str, Any]]:
             continue
 
         # Check occlusion by other windows (slower)
-        if _is_element_covered(ex, ey, ew, eh, pid, win_list):
+        wid = get_window_id(el["element"])
+        if _is_element_covered(ex, ey, ew, eh, pid, win_list, target_wid=wid):
             continue
 
         visible.append(_enrich_element(el))
@@ -378,7 +415,8 @@ def get_all_clickable_elements(pid_bounds_map: Dict[int, List[Tuple[float, float
                 continue
 
             # Check occlusion
-            if _is_element_covered(ex, ey, ew, eh, pid, win_list):
+            wid = get_window_id(el["element"])
+            if _is_element_covered(ex, ey, ew, eh, pid, win_list, target_wid=wid):
                 continue
 
             visible.append(_enrich_element(el))

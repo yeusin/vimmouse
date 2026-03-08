@@ -30,20 +30,6 @@ from .window_manager import WindowManager
 
 log = logging.getLogger(__name__)
 
-# Private API: _AXUIElementGetWindow(AXUIElementRef, CGWindowID *) -> AXError
-# Used to map an AXUIElement window to its CGWindowID for precise window raising.
-try:
-    _hi_bundle = objc.loadBundle(
-        "HIServices", {},
-        bundle_path="/System/Library/Frameworks/ApplicationServices.framework/"
-                    "Frameworks/HIServices.framework",
-    )
-    _fn = {}
-    objc.loadBundleFunctions(_hi_bundle, _fn, [("_AXUIElementGetWindow", b"l@o^I")])
-    _AXUIElementGetWindow = _fn["_AXUIElementGetWindow"]
-except (ImportError, KeyError, AttributeError):
-    _AXUIElementGetWindow = None
-
 # Hint label style
 HINT_FONT_SIZE = 12
 HINT_BG_COLOR = (0.15, 0.15, 0.15, 0.85)  # dark gray
@@ -1218,10 +1204,10 @@ class HintOverlay:
                  target_wid, tx, ty, tw, th, len(windows))
 
         # --- Try matching by CGWindowNumber first (precise) ---
-        if target_wid and _AXUIElementGetWindow is not None:
+        if target_wid:
             for i, win in enumerate(windows):
-                err, ax_wid = _AXUIElementGetWindow(win, None)
-                if err == 0 and ax_wid == target_wid:
+                ax_wid = accessibility.get_window_id(win)
+                if ax_wid == target_wid:
                     AX.AXUIElementPerformAction(win, "AXRaise")
                     log.info("  [%d] MATCHED by wid=%s — raised", i, ax_wid)
                     return
