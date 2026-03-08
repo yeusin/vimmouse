@@ -178,7 +178,7 @@ class HintOverlay:
         self._win_hint_cache = {}  # kCGWindowNumber -> hint char
 
         self._mouse_ctrl = MouseController()
-        self._watermark = WatermarkManager()
+        self._watermark = WatermarkManager(on_hide=self._on_watermark_hide)
         self._cheat_sheet = CheatSheetOverlay()
         self._win_mgr = WindowManager()
 
@@ -242,6 +242,22 @@ class HintOverlay:
         self._binding_lookup = _build_binding_lookup(self._bindings)
         self._window_binding_lookup = _build_window_binding_lookup(self._bindings)
         self._hint_chars = _compute_hint_chars(self._bindings)
+
+    def _on_watermark_hide(self, mode):
+        """Called when the watermark disappears."""
+        if mode == "WINDOW":
+            self._window_cmd_pending = False
+            if self._dragging:
+                self._notify_mode("D")
+            else:
+                self._notify_mode("N")
+            log.info("Window mode deactivated (watermark timeout)")
+            
+            # When window mode is deactivated, check if we should auto-enter insert mode
+            if self._auto_insert_enabled:
+                element = accessibility.get_focused_element()
+                if element:
+                    self._check_focus_and_auto_insert(element)
 
     # -- Helpers --
 
@@ -397,6 +413,7 @@ class HintOverlay:
             
         # Block Escape and reset typing or drag
         if code == _KEY_ESCAPE:
+            AppHelper.callAfter(self._watermark.hide)
             if self._dragging:
                 AppHelper.callAfter(self.toggle_drag)
             else:
@@ -410,13 +427,18 @@ class HintOverlay:
         # Handle pending window command (ctrl+w was pressed previously)
         if self._window_cmd_pending:
             self._window_cmd_pending = False
+            if self._dragging:
+                self._notify_mode("D")
+            else:
+                self._notify_mode("N")
+            AppHelper.callAfter(self._watermark.hide)
+            
             win_action = self._window_binding_lookup.get((code, ctrl))
             if win_action:
                 handler = _WINDOW_ACTIONS.get(win_action)
                 if handler:
                     AppHelper.callAfter(handler(self))
-                    return None
-            return None  # Block unmatched keys after prefix
+            return None  # Block all keys after prefix
 
         shift = bool(flags & _SHIFT_FLAG)
         action = self._binding_lookup.get((code, ctrl, shift))
@@ -460,6 +482,7 @@ class HintOverlay:
                 AppHelper.callAfter(self._open_launcher)
             elif action == "window_prefix":
                 self._window_cmd_pending = True
+                self._notify_mode("W")
                 AppHelper.callAfter(lambda: self._watermark.set_mode("WINDOW"))
             return None
 
@@ -1065,7 +1088,7 @@ class HintOverlay:
         """Cycle focus to the next visible window."""
         if self._cycle_windows is None:
             self._cycle_windows = self._get_visible_windows()
-            self._cycle_idx = -1
+            self._cycle_idx = 0
             log.info("cycle_window: snapshot %d windows:", len(self._cycle_windows))
             for i, w in enumerate(self._cycle_windows):
                 b = w.get(Quartz.kCGWindowBounds, {})

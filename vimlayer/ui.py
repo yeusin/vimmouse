@@ -80,10 +80,11 @@ class RoundedBoxView(NSView):
 
 class WatermarkManager:
     """Manages a floating watermark window for mode transitions."""
-    def __init__(self, mode_text="NORMAL"):
+    def __init__(self, mode_text="NORMAL", on_hide=None):
         self._window = None
         self._flash_gen = 0
         self._mode_text = mode_text
+        self._on_hide = on_hide
         self._setup_window()
 
     def _setup_window(self):
@@ -147,6 +148,8 @@ class WatermarkManager:
             if self._flash_gen == gen:
                 self._box.setHidden_(True)
                 self._window.orderOut_(None)
+                if self._on_hide:
+                    self._on_hide(self._mode_label.stringValue())
 
         AppHelper.callLater(_WM_FLASH_DURATION, _hide)
 
@@ -154,6 +157,8 @@ class WatermarkManager:
         self._flash_gen += 1
         self._box.setHidden_(True)
         self._window.orderOut_(None)
+        if self._on_hide:
+            self._on_hide(self._mode_label.stringValue())
 
 class CheatSheetView(NSView):
     """Rich overlay showing all shortcuts."""
