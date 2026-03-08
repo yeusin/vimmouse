@@ -4,6 +4,8 @@ from unittest.mock import MagicMock
 from vimlayer.hint_overlay import HintOverlay
 from vimlayer.ui import WatermarkManager
 
+_CTRL_FLAG = 1 << 18
+
 @pytest.fixture
 def overlay(mocker):
     mocker.patch("vimlayer.hint_overlay.MouseController")
@@ -178,6 +180,19 @@ def test_window_cycle_keeps_window_mode(overlay, mocker):
     mocker.patch("Quartz.CGEventGetFlags", return_value=0)
     
     mock_cycle = mocker.patch.object(overlay, "cycle_window")
+    
+    overlay._normal_tap_callback(None, Quartz.kCGEventKeyDown, mock_event, None)
+    
+    # Mode should still be pending
+    assert overlay._window_cmd_pending is True
+
+def test_nested_window_prefix_keeps_window_mode(overlay, mocker):
+    overlay._window_cmd_pending = True
+    mock_event = MagicMock()
+    # Mock window_prefix action
+    overlay._binding_lookup = {(13, True, False): "window_prefix"} # ctrl+w
+    mocker.patch("Quartz.CGEventGetIntegerValueField", side_effect=lambda ev, field: 13 if field == Quartz.kCGKeyboardEventKeycode else 0)
+    mocker.patch("Quartz.CGEventGetFlags", return_value=_CTRL_FLAG)
     
     overlay._normal_tap_callback(None, Quartz.kCGEventKeyDown, mock_event, None)
     

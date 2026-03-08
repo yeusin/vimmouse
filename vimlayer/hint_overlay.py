@@ -441,6 +441,14 @@ class HintOverlay:
                     AppHelper.callAfter(self._watermark.flash)
                 return None
 
+            # Check if this key is the window prefix itself (e.g. ctrl+w ctrl+w)
+            shift = bool(flags & _SHIFT_FLAG)
+            action = self._binding_lookup.get((code, ctrl, shift))
+            if action == "window_prefix":
+                # Just refresh the watermark and stay in window mode
+                AppHelper.callAfter(self._watermark.flash)
+                return None
+
             # For all other keys (matched or unmatched), deactivate window mode
             self._window_cmd_pending = False
             if self._dragging:
