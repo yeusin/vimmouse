@@ -193,6 +193,7 @@ class HintOverlay:
         self._cycle_idx = -1
         self._cycle_gen = 0
         self._window_cmd_pending = False
+        self._is_polling = False
         self._launcher = Launcher(on_dismiss=self._on_launcher_dismiss)
         self.reload_keybindings()
 
@@ -292,23 +293,28 @@ class HintOverlay:
         if self._auto_insert_enabled:
             # Clear suppression when switching apps/windows
             self._last_auto_element = None
-            # Start polling for this new app
-            AppHelper.callAfter(self._poll_focus)
+            # Start polling for this new app if not already polling
+            if not self._is_polling:
+                AppHelper.callAfter(self._poll_focus)
 
     def _poll_focus(self):
-        """Poll the current focused element of the target app to detect input fields."""
-        if not self.window or not self._auto_insert_enabled or not self._pid:
+        """Poll the current focused element to detect input fields."""
+        if not self.window or not self._auto_insert_enabled:
+            self._is_polling = False
             return
 
-        app_element = AX.AXUIElementCreateApplication(self._pid)
-        err, element = AX.AXUIElementCopyAttributeValue(app_element, "AXFocusedUIElement", None)
-        if err == 0:
-            self._check_focus_and_auto_insert(element)
+        element = accessibility.get_focused_element()
+        if element:
+            # Only care about elements belonging to the active app
+            if accessibility.get_element_pid(element) == self._pid:
+                self._check_focus_and_auto_insert(element)
+            else:
+                self._check_focus_and_auto_insert(None)
         else:
-            # No element or error: focus is outside the app's accessible tree
             self._check_focus_and_auto_insert(None)
         
         # Re-schedule poll
+        self._is_polling = True
         AppHelper.callLater(0.5, self._poll_focus)
 
     def _check_focus_and_auto_insert(self, element):
@@ -522,7 +528,8 @@ class HintOverlay:
         self._start_watching_focus()
 
         if self._auto_insert_enabled:
-            AppHelper.callAfter(self._poll_focus)
+            if not self._is_polling:
+                AppHelper.callAfter(self._poll_focus)
 
         self._watermark.flash()
         self._notify_mode("N")

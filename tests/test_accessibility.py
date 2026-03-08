@@ -37,3 +37,55 @@ def test_search():
     results = accessibility.search("cel", elements) # fuzzy
     assert len(results) == 1
     assert results[0]["title"] == "Cancel"
+
+
+def test_is_input_element_new_roles():
+    from unittest.mock import MagicMock
+    # Mock element
+    mock_el = MagicMock()
+    
+    def get_attr(el, attr, _):
+        if attr == "AXRole":
+            return 0, el._role
+        if attr == "AXSubrole":
+            return 0, getattr(el, "_subrole", None)
+        return -1, None
+
+    import vimmouse.accessibility as acc
+    # Temporarily monkeypatch
+    original = acc.AXUIElementCopyAttributeValue
+    acc.AXUIElementCopyAttributeValue = get_attr
+    try:
+        # Test AXTextField
+        mock_el._role = "AXTextField"
+        assert acc.is_input_element(mock_el) is True
+        
+        # Test AXSearchField
+        mock_el._role = "AXSearchField"
+        assert acc.is_input_element(mock_el) is True
+        
+        # Test AXComboBox
+        mock_el._role = "AXComboBox"
+        assert acc.is_input_element(mock_el) is True
+        
+        # Test subrole AXSearchField
+        mock_el._role = "AXGroup"
+        mock_el._subrole = "AXSearchField"
+        assert acc.is_input_element(mock_el) is True
+        
+        # Test non-input role
+        mock_el._role = "AXButton"
+        mock_el._subrole = None
+        assert acc.is_input_element(mock_el) is False
+    finally:
+        acc.AXUIElementCopyAttributeValue = original
+
+def test_get_focused_element(mocker):
+    mock_sw = mocker.patch("vimmouse.accessibility.AXUIElementCreateSystemWide")
+    mock_copy = mocker.patch("vimmouse.accessibility.AXUIElementCopyAttributeValue")
+    
+    mock_copy.return_value = (0, "mock_element")
+    
+    el = accessibility.get_focused_element()
+    assert el == "mock_element"
+    mock_sw.assert_called_once()

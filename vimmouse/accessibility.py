@@ -6,6 +6,8 @@ import Quartz
 from ApplicationServices import (
     AXUIElementCreateApplication,
     AXUIElementCopyAttributeValue,
+    AXUIElementCreateSystemWide,
+    AXUIElementGetPid,
     AXValueGetValue,
     kAXValueCGPointType,
     kAXValueCGSizeType,
@@ -24,6 +26,7 @@ INTERACTIVE_ROLES = {
     "AXButton",
     "AXTextField",
     "AXTextArea",
+    "AXSearchField",
     "AXCheckBox",
     "AXRadioButton",
     "AXPopUpButton",
@@ -57,6 +60,7 @@ ALWAYS_CLICKABLE = {
     "AXComboBox",
     "AXTextField",
     "AXTextArea",
+    "AXSearchField",
     "AXTab",
     "AXDisclosureTriangle",
     "AXIncrementor",
@@ -76,6 +80,8 @@ CLICKABLE_IF_PRESSABLE = {
 INPUT_ROLES = {
     "AXTextField",
     "AXTextArea",
+    "AXSearchField",
+    "AXComboBox",
 }
 
 
@@ -84,7 +90,27 @@ def is_input_element(element: Any) -> bool:
     role = _get_attr(element, "AXRole")
     if role in INPUT_ROLES:
         return True
+    subrole = _get_attr(element, "AXSubrole")
+    if subrole == "AXSearchField":
+        return True
     return False
+
+
+def get_focused_element() -> Optional[Any]:
+    """Get the globally focused UI element."""
+    system_wide = AXUIElementCreateSystemWide()
+    err, element = AXUIElementCopyAttributeValue(system_wide, "AXFocusedUIElement", None)
+    if err == 0:
+        return element
+    return None
+
+
+def get_element_pid(element: Any) -> Optional[int]:
+    """Get the PID of the application owning this element."""
+    err, pid = AXUIElementGetPid(element, None)
+    if err == 0:
+        return pid
+    return None
 
 
 def _get_attr(element: Any, attr: str) -> Any:
