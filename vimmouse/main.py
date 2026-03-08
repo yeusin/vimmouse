@@ -1,5 +1,13 @@
 """VimMouse - Spotlight-like UI element search and click for macOS."""
 
+import os
+import sys
+
+# Remove environment variables set by py2app that can interfere with subprocesses.
+# These are set by the py2app bootstrapper but can break external subprocesses.
+for var in ["ARGVZERO", "PYTHONPATH", "PYTHONHOME", "PYTHONUNBUFFERED", "PYTHONDONTWRITEBYTECODE"]:
+    os.environ.pop(var, None)
+
 import logging
 import signal
 import subprocess
