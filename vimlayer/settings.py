@@ -188,6 +188,9 @@ class SettingsController(NSObject):
         return self
 
     def showWindow(self):
+        if self._overlay:
+            self._overlay.suspend_tap(True)
+
         if self._window is not None:
             self._refresh_values()
             NSApp.setActivationPolicy_(1)
@@ -431,6 +434,7 @@ class SettingsController(NSObject):
         config.save(data)
         if self._overlay:
             self._overlay.reload_keybindings()
+            self._overlay.suspend_tap(False)
         self._window.orderOut_(None)
         NSApp.setActivationPolicy_(2)
 
@@ -447,9 +451,13 @@ class SettingsController(NSObject):
     @objc.typedSelector(b"v@:@")
     def cancel_(self, sender):
         self._stop_all_recording()
+        if self._overlay:
+            self._overlay.suspend_tap(False)
         self._window.orderOut_(None)
         NSApp.setActivationPolicy_(2)
 
     def windowWillClose_(self, notification):
         self._stop_all_recording()
+        if self._overlay:
+            self._overlay.suspend_tap(False)
         NSApp.setActivationPolicy_(2)

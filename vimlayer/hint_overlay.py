@@ -455,6 +455,18 @@ class HintOverlay:
                 self._exit_insert_mode()
             self._last_auto_element = None
 
+    def suspend_tap(self, suspended=True):
+        """Temporarily suspend or resume the normal mode event tap and overlay window."""
+        if suspended:
+            self._remove_normal_tap()
+            if self.window:
+                self.window.orderOut_(None)
+        else:
+            if self.window:
+                self.window.orderFrontRegardless()
+            if not self._insert_mode:
+                self._install_normal_tap()
+
     # -- Global event tap for normal mode --
 
     def _install_normal_tap(self):
