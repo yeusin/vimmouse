@@ -256,9 +256,9 @@ class HintOverlay:
                     flags |= Quartz.kCGEventFlagMaskAlternate
                 if spec.get("shift"):
                     flags |= Quartz.kCGEventFlagMaskShift
-                return config.format_hotkey(spec["keycode"], flags, use_symbols=False)
+                return config.format_hotkey(spec["keycode"], flags, use_symbols=True)
 
-            return config.format_binding(spec, use_symbols=False)
+            return config.format_binding(spec, use_symbols=True)
 
         sections = [
             (
@@ -270,15 +270,15 @@ class HintOverlay:
                     ),
                     (b("click"), "Left click"),
                     (b("right_click"), "Right click"),
-                    (f"{b('scroll_up')} / {b('scroll_down')}", "Scroll up / down"),
-                    (f"{b('back')} / {b('forward')}", "Mouse back / forward"),
+                    (f"{b('scroll_up')} {b('scroll_down')}", "Scroll up / down"),
+                    (f"{b('back')} {b('forward')}", "Mouse back / forward"),
                     (b("toggle_drag"), "Toggle mouse drag"),
                 ],
             ),
             (
                 "Media Control",
                 [
-                    (f"{b('volume_up')} / {b('volume_down')}", "Volume Up / Down"),
+                    (f"{b('volume_up')} {b('volume_down')}", "Volume Up / Down"),
                     (b("volume_mute"), "Toggle Mute"),
                 ],
             ),
@@ -296,7 +296,7 @@ class HintOverlay:
                     (b("insert_mode"), "Enter Insert mode"),
                     (b("open_launcher"), "Open app launcher"),
                     (
-                        config.format_hotkey(*hotkey.get_hotkey(), use_symbols=False),
+                        config.format_hotkey(*hotkey.get_hotkey(), use_symbols=True),
                         "Return to Normal mode",
                     ),
                 ],
@@ -320,7 +320,7 @@ class HintOverlay:
                         f"{b('win_sixth_bl')} {b('win_sixth_bc')} {b('win_sixth_br')}",
                         "Tile to bottom sixth",
                     ),
-                    (f"{b('win_center')} / {b('win_maximize')}", "Center / Maximize window"),
+                    (f"{b('win_center')} {b('win_maximize')}", "Center / Maximize window"),
                 ],
             ),
         ]

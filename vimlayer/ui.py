@@ -27,16 +27,17 @@ _WM_BOX_PAD_X = 24
 _WM_BOX_PAD_Y = 16
 
 # Cheat sheet style defaults
-_CS_BG_COLOR = (0.05, 0.05, 0.05, 0.92)
+_CS_BG_COLOR = (0.05, 0.05, 0.05, 0.95)
 _CS_TEXT_COLOR = (0.95, 0.95, 0.95, 1.0)
 _CS_DIM_COLOR = (0.6, 0.6, 0.6, 1.0)
-_CS_CORNER = 20
-_CS_PAD = 30
-_CS_TITLE_SIZE = 24
-_CS_SECTION_SIZE = 16
-_CS_KEY_SIZE = 13
-_CS_DESC_SIZE = 13
-_CS_WIDTH = 600
+_CS_ACCENT_COLOR = (0.3, 0.6, 1.0, 1.0)
+_CS_CORNER = 16
+_CS_PAD = 25
+_CS_TITLE_SIZE = 22
+_CS_SECTION_SIZE = 13
+_CS_KEY_SIZE = 12
+_CS_DESC_SIZE = 12
+_CS_WIDTH = 520
 
 
 def make_label(text, font_size, bg_color, text_color, draw_bg=True, bold=True):
@@ -50,11 +51,10 @@ def make_label(text, font_size, bg_color, text_color, draw_bg=True, bold=True):
     if draw_bg and bg_color:
         label.setBackgroundColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(*bg_color))
     if text_color:
-        label.setTextColor_(
-            NSColor.colorWithCalibratedRed_green_blue_alpha_(*text_color)
-            if len(text_color) == 4
-            else NSColor.colorWithWhite_alpha_(*text_color)
-        )
+        if len(text_color) == 4:
+            label.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(*text_color))
+        else:
+            label.setTextColor_(NSColor.colorWithWhite_alpha_(*text_color))
     font = NSFont.boldSystemFontOfSize_(font_size) if bold else NSFont.systemFontOfSize_(font_size)
     label.setFont_(font)
     label.sizeToFit()
@@ -183,7 +183,7 @@ class WatermarkManager:
 
 
 class CheatSheetView(NSView):
-    """Rich overlay showing all shortcuts."""
+    """Rich overlay showing all shortcuts in a clean single-column layout."""
 
     def initWithFrame_sections_(self, frame, sections):
         self = objc.super(CheatSheetView, self).initWithFrame_(frame)
@@ -193,37 +193,43 @@ class CheatSheetView(NSView):
         return self
 
     def _setup_ui(self):
-        y = self.frame().size.height - _CS_PAD
+        w, h = self.frame().size.width, self.frame().size.height
+        y = h - _CS_PAD
 
-        title = make_label(
-            "VimLayer Shortcuts", _CS_TITLE_SIZE, None, _CS_TEXT_COLOR, draw_bg=False
-        )
+        # Title
+        title = make_label("VimLayer Shortcuts", _CS_TITLE_SIZE, None, _CS_TEXT_COLOR, draw_bg=False)
         title.setFrameOrigin_((_CS_PAD, y - title.frame().size.height))
         self.addSubview_(title)
-        y -= title.frame().size.height + 25
+        
+        hint = make_label("Esc to close", 11, None, _CS_DIM_COLOR, draw_bg=False, bold=False)
+        hint.setFrameOrigin_((w - _CS_PAD - hint.frame().size.width, y - title.frame().size.height + 4))
+        self.addSubview_(hint)
+        
+        y -= title.frame().size.height + 30
 
         for section_title, keys in self._sections:
             sec = make_label(
-                section_title.upper(), _CS_SECTION_SIZE, None, _CS_DIM_COLOR, draw_bg=False
+                section_title.upper(), _CS_SECTION_SIZE, None, _CS_ACCENT_COLOR, draw_bg=False
             )
             sec.setFrameOrigin_((_CS_PAD, y - sec.frame().size.height))
             self.addSubview_(sec)
-            y -= sec.frame().size.height + 10
+            y -= sec.frame().size.height + 12
 
             for key_text, desc_text in keys:
+                # Key label: Right-aligned in a 140px wide slot
                 key = make_label(key_text, _CS_KEY_SIZE, None, _CS_TEXT_COLOR, draw_bg=False)
-                # Right align key text in a 110px column
-                key_w = key.frame().size.width
-                key.setFrameOrigin_((_CS_PAD + 110 - key_w, y - key.frame().size.height))
+                kw = key.frame().size.width
+                key.setFrameOrigin_((_CS_PAD + 140 - kw, y - key.frame().size.height))
                 self.addSubview_(key)
 
+                # Description label: Left-aligned with a gap
                 desc = make_label(
                     desc_text, _CS_DESC_SIZE, None, _CS_TEXT_COLOR, draw_bg=False, bold=False
                 )
-                desc.setFrameOrigin_((_CS_PAD + 125, y - desc.frame().size.height))
+                desc.setFrameOrigin_((_CS_PAD + 155, y - desc.frame().size.height))
                 self.addSubview_(desc)
 
-                y -= max(key.frame().size.height, desc.frame().size.height) + 6
+                y -= max(key.frame().size.height, desc.frame().size.height) + 10
 
             y -= 20
 
@@ -250,16 +256,16 @@ class CheatSheetOverlay:
             self.show(sections)
 
     def show(self, sections):
-        # Always recreate the view to ensure it reflects current bindings
         if self._window:
             self._window.orderOut_(None)
             self._window = None
 
         screen = NSScreen.mainScreen().frame()
 
-        # Calculate required height based on content
-        total_keys = sum(len(k) for _, k in sections)
-        h = 100 + (len(sections) * 50) + (total_keys * 20)
+        # Calculate height for single column
+        total_items = sum(len(k) for _, k in sections)
+        h = 100 + (len(sections) * 45) + (total_items * 24)
+        h = min(h, screen.size.height - 100)
 
         win_rect = NSMakeRect(
             (screen.size.width - _CS_WIDTH) / 2, (screen.size.height - h) / 2, _CS_WIDTH, h
