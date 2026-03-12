@@ -128,27 +128,6 @@ def _build_binding_lookup(bindings):
     """Build a dict mapping (keycode, ctrl, shift, cmd, alt) → action from keybindings config."""
     lookup = {}
     for action, spec in bindings.items():
-        if action.startswith("win_") and action != "window_prefix":
-            continue
-        specs = spec if isinstance(spec, list) else [spec]
-        for s in specs:
-            key = (
-                s["keycode"],
-                bool(s.get("ctrl", False)),
-                bool(s.get("shift", False)),
-                bool(s.get("cmd", False)),
-                bool(s.get("alt", False)),
-            )
-            lookup[key] = action
-    return lookup
-
-
-def _build_window_binding_lookup(bindings):
-    """Build a dict mapping (keycode, ctrl, shift, cmd, alt) → action for window sub-commands."""
-    lookup = {}
-    for action, spec in bindings.items():
-        if not action.startswith("win_"):
-            continue
         specs = spec if isinstance(spec, list) else [spec]
         for s in specs:
             key = (
@@ -165,7 +144,6 @@ def _build_window_binding_lookup(bindings):
 # Window sub-command dispatch: action → (overlay) → callable
 # Each returns a no-arg callable that AppHelper.callAfter can invoke.
 _WINDOW_ACTIONS = {
-    "win_cycle": lambda o: o.cycle_window,
     "win_tile_1": lambda o: lambda: o._win_mgr.tile_window(1),
     "win_tile_2": lambda o: lambda: o._win_mgr.tile_window(2),
     "win_tile_3": lambda o: lambda: o._win_mgr.tile_window(3),
@@ -253,11 +231,6 @@ class HintOverlay:
         self._normal_source = None
         self._menu_tap = None
         self._menu_source = None
-        self._cycle_windows = None
-        self._cycle_idx = -1
-        self._cycle_gen = 0
-        self._window_cmd_pending = False
-        self._window_watermark_active = False
         self._is_polling = False
         self._launcher = Launcher(on_dismiss=self._on_launcher_dismiss)
         self.reload_keybindings()
@@ -322,7 +295,6 @@ class HintOverlay:
                 [
                     (b("insert_mode"), "Enter Insert mode"),
                     (b("open_launcher"), "Open app launcher"),
-                    (b("window_prefix"), "Enter Window command mode"),
                     (
                         config.format_hotkey(*hotkey.get_hotkey(), use_symbols=False),
                         "Return to Normal mode",
@@ -351,12 +323,6 @@ class HintOverlay:
                     (f"{b('win_center')} / {b('win_maximize')}", "Center / Maximize window"),
                 ],
             ),
-            (
-                "Window Commands (Prefix + ...)",
-                [
-                    (b("win_cycle"), "Cycle through windows"),
-                ],
-            ),
         ]
         return sections
 
@@ -367,27 +333,17 @@ class HintOverlay:
         self._global_tiling_bindings = cfg.get("global_tiling_bindings", {})
         self._bindings = config.load_keybindings()
         self._binding_lookup = _build_binding_lookup(self._bindings)
-        self._window_binding_lookup = _build_window_binding_lookup(self._bindings)
         self._hint_chars = _compute_hint_chars(self._bindings)
         if self._on_config_change:
             self._on_config_change()
 
     def _on_watermark_hide(self, mode):
         """Called when the watermark disappears."""
-        if mode == "WINDOW":
-            self._window_cmd_pending = False
-            self._window_watermark_active = False
-            if self._dragging:
-                self._notify_mode("D")
-            else:
-                self._notify_mode("N")
-            log.info("Window mode deactivated (watermark timeout)")
-
-            # When window mode is deactivated, check if we should auto-enter insert mode
-            if self._auto_insert_enabled:
-                element = accessibility.get_focused_element()
-                if element:
-                    self._check_focus_and_auto_insert(element)
+        # When normal mode is re-entered, check if we should auto-enter insert mode
+        if self._auto_insert_enabled:
+            element = accessibility.get_focused_element()
+            if element:
+                self._check_focus_and_auto_insert(element)
 
     # -- Helpers --
 
@@ -422,8 +378,6 @@ class HintOverlay:
     def _on_app_activated(self, note):
         """Called when any app gains focus. Refresh hints for the newly focused app."""
         if not self.window or self._clicking:
-            return
-        if self._cycle_windows is not None:
             return
         activated = note.userInfo()["NSWorkspaceApplicationKey"]
         activated_pid = activated.processIdentifier()
@@ -466,10 +420,6 @@ class HintOverlay:
     def _check_focus_and_auto_insert(self, element):
         """Enter insert mode if element is a text field, exit if it was auto-entered."""
         if not self.window or not self._auto_insert_enabled:
-            return
-
-        # Suppress auto-insert while window mode (prefix state or watermark) is active
-        if self._window_cmd_pending or self._window_watermark_active:
             return
 
         if element is None:
@@ -568,47 +518,7 @@ class HintOverlay:
             AppHelper.callAfter(self.backspace)
             return None
 
-        # 2. Handle pending window command (ctrl+w was pressed previously)
-        if self._window_cmd_pending:
-            AppHelper.callAfter(self.cancel_drag)
-            win_action = self._window_binding_lookup.get((code, ctrl, shift, cmd, alt))
-
-            # Special case for win_cycle: exit prefix state immediately to require prefix for next command,
-            # but keep the mode as 'W' until the watermark disappears.
-            if win_action == "win_cycle":
-                handler = _WINDOW_ACTIONS.get(win_action)
-                if handler:
-                    AppHelper.callAfter(handler(self))
-                    # Reset/refresh watermark timer
-                    AppHelper.callAfter(self._watermark.flash)
-
-                self._window_cmd_pending = False
-                # We do NOT call self._notify_mode here; it will be called in _on_watermark_hide
-                return None
-
-            # Check if this key is the window prefix itself (e.g. ctrl+w ctrl+w)
-            action = self._binding_lookup.get((code, ctrl, shift, cmd, alt))
-            if action == "window_prefix":
-                # Just refresh the watermark and stay in window mode
-                AppHelper.callAfter(self._watermark.flash)
-                return None
-
-            # For all other keys (matched or unmatched), deactivate window mode
-            self._window_cmd_pending = False
-            self._window_watermark_active = False
-            if self._dragging:
-                self._notify_mode("D")
-            else:
-                self._notify_mode("N")
-            AppHelper.callAfter(self._watermark.hide)
-
-            if win_action:
-                handler = _WINDOW_ACTIONS.get(win_action)
-                if handler:
-                    AppHelper.callAfter(handler(self))
-            return None  # Block all keys after prefix
-
-        # 3. Check for registered normal mode actions
+        # 2. Check for registered normal mode actions
         action = self._binding_lookup.get((code, ctrl, shift, cmd, alt))
         repeat = bool(Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventAutorepeat))
 
@@ -666,11 +576,6 @@ class HintOverlay:
                 AppHelper.callAfter(lambda: self._cheat_sheet.toggle(sections))
             elif action == "open_launcher":
                 AppHelper.callAfter(self._open_launcher)
-            elif action == "window_prefix":
-                self._window_cmd_pending = True
-                self._window_watermark_active = True
-                self._notify_mode("W")
-                AppHelper.callAfter(lambda: self._watermark.set_mode("WINDOW"))
             return None
 
         # 4. Passthrough for Cmd/Alt combinations not caught above
@@ -769,11 +674,17 @@ class HintOverlay:
             pid = w.get(Quartz.kCGWindowOwnerPID, 0)
             if pid == my_pid:
                 continue
+            
+            # Layer 0 is the standard window layer.
             if w.get(Quartz.kCGWindowLayer, -1) != 0:
                 continue
+                
+            # Filter out tiny windows or empty titles if they seem like non-windows
             bounds = w.get(Quartz.kCGWindowBounds, {})
-            if bounds.get("Width", 0) == 0 or bounds.get("Height", 0) == 0:
+            if bounds.get("Width", 0) < 100 or bounds.get("Height", 0) < 100:
                 continue
+                
+            # Check AXRole to ensure it's a real window (optional but good)
             windows.append(w)
         return windows
 
@@ -1369,58 +1280,41 @@ class HintOverlay:
         self._hide_all_labels()
         self._hints_visible = False
 
-    # -- Window switching --
+    # -- Window switching helpers --
 
-    def cycle_window(self):
-        """Cycle focus to the next visible window."""
-        if self._cycle_windows is None:
-            self._cycle_windows = self._get_visible_windows()
-            self._cycle_idx = 0
-            log.info("cycle_window: snapshot %d windows:", len(self._cycle_windows))
-            for i, w in enumerate(self._cycle_windows):
-                b = w.get(Quartz.kCGWindowBounds, {})
-                log.info(
-                    "  [%d] pid=%s owner=%s wid=%s bounds=(%s,%s,%s,%s)",
-                    i,
-                    w.get(Quartz.kCGWindowOwnerPID),
-                    w.get(Quartz.kCGWindowOwnerName, "?"),
-                    w.get(Quartz.kCGWindowNumber, "?"),
-                    b.get("X"),
-                    b.get("Y"),
-                    b.get("Width"),
-                    b.get("Height"),
-                )
-        if not self._cycle_windows:
-            log.info("cycle_window: no windows to cycle")
-            return
-        self._cycle_idx = (self._cycle_idx + 1) % len(self._cycle_windows)
-        win_info = self._cycle_windows[self._cycle_idx]
-        log.info(
-            "cycle_window: idx=%d/%d -> pid=%s owner=%s wid=%s",
-            self._cycle_idx,
-            len(self._cycle_windows),
-            win_info.get(Quartz.kCGWindowOwnerPID),
-            win_info.get(Quartz.kCGWindowOwnerName, "?"),
-            win_info.get(Quartz.kCGWindowNumber, "?"),
+    def _get_visible_windows(self):
+        """Get visible on-screen windows (excluding our own process)."""
+        my_pid = os.getpid()
+        win_list = Quartz.CGWindowListCopyWindowInfo(
+            Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements,
+            Quartz.kCGNullWindowID,
         )
-        pid = win_info[Quartz.kCGWindowOwnerPID]
-        app = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
-        if app:
-            app.activateWithOptions_(0)
-            self._pid = pid
-        bounds = win_info[Quartz.kCGWindowBounds]
-        wid = win_info.get(Quartz.kCGWindowNumber, 0)
-        self._raise_window(pid, bounds, wid)
-        mouse.move_cursor(bounds["X"] + bounds["Width"] / 2, bounds["Y"] + bounds["Height"] / 2)
-        # Clear snapshot after 2s of no cycling
-        self._cycle_gen += 1
-        gen = self._cycle_gen
-        AppHelper.callLater(5.0, lambda: self._clear_cycle(gen))
+        windows = []
+        for w in win_list:
+            pid = w.get(Quartz.kCGWindowOwnerPID, 0)
+            if pid == my_pid:
+                continue
 
-    def _clear_cycle(self, gen):
-        if gen == self._cycle_gen:
-            log.info("cycle_window: snapshot cleared (timeout)")
-            self._cycle_windows = None
+            # Layer 0 is the standard window layer.
+            if w.get(Quartz.kCGWindowLayer, -1) != 0:
+                continue
+
+            # Filter out tiny windows
+            bounds = w.get(Quartz.kCGWindowBounds, {})
+            width = bounds.get("Width", 0)
+            height = bounds.get("Height", 0)
+            if width < 100 or height < 100:
+                continue
+
+            # Most real windows have a name or a non-empty owner name
+            owner = w.get(Quartz.kCGWindowOwnerName, "")
+            
+            # Filter out known "junk" windows
+            if owner == "SystemUIServer" or owner == "Window Server":
+                continue
+
+            windows.append(w)
+        return windows
 
     def _switch_to_window(self, win_info):
         """Activate the app owning the given window and raise it."""
@@ -1432,62 +1326,50 @@ class HintOverlay:
         pid = win_info[Quartz.kCGWindowOwnerPID]
         app = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
         if app:
-            app.activateWithOptions_(0)
+            # 2 = NSApplicationActivateIgnoringOtherApps
+            app.activateWithOptions_(2)
             self._pid = pid
         wid = win_info.get(Quartz.kCGWindowNumber, 0)
         self._raise_window(pid, bounds, wid)
 
     def _raise_window(self, pid, bounds, target_wid=0):
-        """Raise a specific window by matching its position/size via Accessibility.
-
-        When *target_wid* (a CGWindowNumber) is provided we first try to match
-        by window-ID using the accessibility.get_window_id helper, which
-        avoids ambiguity when two windows share identical bounds.  Falls back to
-        bounds matching when the window-ID lookup is unavailable or fails.
-        """
+        """Raise a specific window by matching its position/size via Accessibility."""
         app_ref = AX.AXUIElementCreateApplication(pid)
         err, windows = AX.AXUIElementCopyAttributeValue(app_ref, "AXWindows", None)
         if err != 0 or not windows:
             log.info("_raise_window: no AXWindows for pid=%s (err=%s)", pid, err)
             return
+
         tx, ty = bounds["X"], bounds["Y"]
         tw, th = bounds["Width"], bounds["Height"]
-        log.info(
-            "_raise_window: looking for wid=%s (%.0f,%.0f,%.0f,%.0f) among %d AXWindows",
-            target_wid,
-            tx,
-            ty,
-            tw,
-            th,
-            len(windows),
-        )
 
-        # --- Try matching by CGWindowNumber first (precise) ---
+        # 1. Match by window ID (most reliable)
         if target_wid:
-            for i, win in enumerate(windows):
-                ax_wid = accessibility.get_window_id(win)
-                if ax_wid == target_wid:
-                    AX.AXUIElementPerformAction(win, "AXRaise")
-                    log.info("  [%d] MATCHED by wid=%s — raised", i, ax_wid)
+            for w in windows:
+                if accessibility.get_window_id(w) == target_wid:
+                    AX.AXUIElementPerformAction(w, "AXRaise")
+                    # Also try to set as main and focused
+                    AX.AXUIElementSetAttributeValue(w, "AXMain", True)
+                    AX.AXUIElementSetAttributeValue(w, "AXFocused", True)
+                    log.info("  [wid=%s] MATCHED by window-ID — raised and focused", target_wid)
                     return
 
-        # --- Fallback: match by bounds ---
+        # 2. Fallback to bounds matching
         for i, win in enumerate(windows):
             err, pos = AX.AXUIElementCopyAttributeValue(win, "AXPosition", None)
-            _, size = AX.AXUIElementCopyAttributeValue(win, "AXSize", None)
-            if pos is None or size is None:
-                log.info("  [%d] skipped (no pos/size)", i)
-                continue
-            _, p = AX.AXValueGetValue(pos, AX.kAXValueCGPointType, None)
-            _, s = AX.AXValueGetValue(size, AX.kAXValueCGSizeType, None)
-            log.info("  [%d] pos=(%.0f,%.0f) size=(%.0f,%.0f)", i, p.x, p.y, s.width, s.height)
-            if (
-                abs(p.x - tx) < 2
-                and abs(p.y - ty) < 2
-                and abs(s.width - tw) < 2
-                and abs(s.height - th) < 2
-            ):
-                AX.AXUIElementPerformAction(win, "AXRaise")
-                log.info("  [%d] MATCHED by bounds — raised", i)
-                return
+            err2, size = AX.AXUIElementCopyAttributeValue(win, "AXSize", None)
+            if err == 0 and err2 == 0:
+                _, p = AX.AXValueGetValue(pos, AX.kAXValueCGPointType, None)
+                _, s = AX.AXValueGetValue(size, AX.kAXValueCGSizeType, None)
+                if (
+                    abs(p.x - tx) < 10
+                    and abs(p.y - ty) < 10
+                    and abs(s.width - tw) < 10
+                    and abs(s.height - th) < 10
+                ):
+                    AX.AXUIElementPerformAction(win, "AXRaise")
+                    AX.AXUIElementSetAttributeValue(win, "AXMain", True)
+                    AX.AXUIElementSetAttributeValue(win, "AXFocused", True)
+                    log.info("  [%d] MATCHED by bounds (%.0f,%.0f) — raised and focused", i, tx, ty)
+                    return
         log.info("_raise_window: no match found")

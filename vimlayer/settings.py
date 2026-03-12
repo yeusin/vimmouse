@@ -43,8 +43,6 @@ _ACTION_LABELS = {
     "right_click": "Right Click",
     "toggle_drag": "Toggle Drag",
     "open_launcher": "App Launcher",
-    "window_prefix": "Window Cmd",
-    "win_cycle": "Win: Cycle",
 }
 
 _GLOBAL_TILING_LABELS = {
@@ -334,9 +332,8 @@ class SettingsController(NSObject):
         for sub in list(self._doc_view.subviews()):
             sub.removeFromSuperview()
         
-        # Headers: "Normal Mode", "After Window Cmd", "Global Tiling"
-        # We'll explicitly manage the layout
-        extra_rows = 3
+        # Headers: "Normal Mode", "Global Tiling"
+        extra_rows = 2
         doc_h = (len(self._actions) + len(self._global_actions) + extra_rows) * _ROW_H
         self._doc_view.setFrameSize_((self._doc_view.frame().size.width, doc_h))
         
@@ -352,27 +349,10 @@ class SettingsController(NSObject):
         row_idx += 1
         
         for action in self._actions:
-            if action.startswith("win_"):
-                continue
             self._add_binding_row(action, doc_h, row_idx)
             row_idx += 1
             
-        # 2. After Window Cmd (Prefix)
-        ry = doc_h - (row_idx + 1) * _ROW_H + 5
-        sep = NSTextField.labelWithString_("After Window Cmd (Prefix):")
-        sep.setFont_(NSFont.boldSystemFontOfSize_(11))
-        sep.setTextColor_(NSColor.secondaryLabelColor())
-        sep.setFrame_(NSMakeRect(5, ry, 250, 16))
-        self._doc_view.addSubview_(sep)
-        row_idx += 1
-        
-        for action in self._actions:
-            if not action.startswith("win_"):
-                continue
-            self._add_binding_row(action, doc_h, row_idx)
-            row_idx += 1
-
-        # 3. Global Tiling Bindings
+        # 2. Global Tiling Bindings
         ry = doc_h - (row_idx + 1) * _ROW_H + 5
         sep = NSTextField.labelWithString_("Global Tiling Shortcuts (All Modes):")
         sep.setFont_(NSFont.boldSystemFontOfSize_(11))

@@ -86,14 +86,6 @@ Window tiling and centering work globally in any mode (including Insert mode) us
 | `Cmd+Ctrl+C` | Center window |
 | `Cmd+Ctrl+Enter` | Maximize window |
 
-### Window Commands (Prefix)
-
-Press **Ctrl+W** followed by:
-
-| Key | Action |
-|-----|--------|
-| `Ctrl+W` | Cycle through windows |
-
 ### Hints
 
 When hints are visible, type the hint characters to click the corresponding element:

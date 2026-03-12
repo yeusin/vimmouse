@@ -54,8 +54,6 @@ _DEFAULT_KEYBINDINGS: Dict[str, BindingEntry] = {
     "volume_mute": {"keycode": 109},  # F10
     "volume_down": {"keycode": 103}, # F11
     "volume_up": {"keycode": 111},   # F12
-    "window_prefix": {"keycode": 13, "ctrl": True},  # ctrl+w
-    "win_cycle": {"keycode": 13, "ctrl": True},  # ctrl+w (after prefix)
 }
 
 # Mapping flag bits to both symbols and text
