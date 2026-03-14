@@ -36,6 +36,9 @@ from vimlayer.hint_overlay import HintOverlay
 
 @pytest.fixture
 def overlay(mocker):
+    # Ensure Quartz in hint_overlay uses our mock
+    mocker.patch("vimlayer.hint_overlay.Quartz", mock_quartz)
+    
     # Mock dependencies within HintOverlay
     mocker.patch("vimlayer.hint_overlay.WindowManager")
     mocker.patch("vimlayer.hint_overlay.WatermarkManager")
@@ -45,48 +48,73 @@ def overlay(mocker):
     mocker.patch("vimlayer.hint_overlay.config.load")
     mocker.patch("vimlayer.hint_overlay.config.load_keybindings")
     
-    # Mocking config.load_keybindings to return some default bindings
-    from vimlayer import config
-    config.load_keybindings.return_value = {
-        "move_left": {"keycode": 4},   # 'h'
-        "move_down": {"keycode": 38},  # 'j'
-        "move_up": {"keycode": 40},    # 'k'
-        "move_right": {"keycode": 37}, # 'l'
-        "click": {"keycode": 49},      # space
-        "right_click": {"keycode": 49, "shift": True}, # shift + space
-        "insert_mode": {"keycode": 34}, # 'i'
-        "toggle_drag": {"keycode": 9}, # 'v'
-        "scroll_up": {"keycode": 11, "ctrl": True}, # ctrl + b (modeled as 11 for testing)
-        "scroll_down": {"keycode": 3, "ctrl": True},  # ctrl + f (modeled as 3 for testing)
-        "back": {"keycode": 11},      # 'b'
-        "forward": {"keycode": 13},   # 'w'
-        "toggle_all_hints": {"keycode": 3}, # 'f'
-        "open_launcher": {"keycode": 44}, # '/'
-        "toggle_cheat_sheet": {"keycode": 44, "shift": True}, # '?'
-    }
+    # Mocking internal constants that affect key blocking and flag detection
+    mocker.patch("vimlayer.hint_overlay._KEYCODE_TO_CHAR", {
+        4: "h", 38: "j", 40: "k", 37: "l", 49: "space", 34: "i", 9: "v", 11: "b", 3: "f", 13: "w", 44: "/", 53: "esc"
+    })
+    mocker.patch("vimlayer.hint_overlay._NAV_KEYCODES", set())
+    mocker.patch("vimlayer.hint_overlay._KEY_ESCAPE", 53)
+    mocker.patch("vimlayer.hint_overlay._KEY_BACKSPACE", 51)
     
+    # Use simple bits for flags to ensure bitwise ops work as expected in mocks
+    mocker.patch("vimlayer.hint_overlay._CMD_FLAG", 1)
+    mocker.patch("vimlayer.hint_overlay._SHIFT_FLAG", 2)
+    mocker.patch("vimlayer.hint_overlay._ALT_FLAG", 4)
+    mocker.patch("vimlayer.hint_overlay._CTRL_FLAG", 8)
+    
+    # Ensure these are also used in test cases for CGEventGetFlags
+    mock_quartz.kCGEventFlagMaskCommand = 1
+    mock_quartz.kCGEventFlagMaskShift = 2
+    mock_quartz.kCGEventFlagMaskAlternate = 4
+    mock_quartz.kCGEventFlagMaskControl = 8
+    
+    # Mock Quartz.CGEventGetIntegerValueField to work correctly with mocked constants
+    def side_effect(event, field):
+        if field == 0: # kCGKeyboardEventKeycode
+            return event.keycode
+        if field == 1: # kCGKeyboardEventAutorepeat
+            return getattr(event, "repeat", 0)
+        return 0
+    mock_quartz.CGEventGetIntegerValueField.side_effect = side_effect
+
     o = HintOverlay()
+    o._binding_lookup = {
+        (4, False, False, False, False): "move_left",
+        (38, False, False, False, False): "move_down",
+        (40, False, False, False, False): "move_up",
+        (37, False, False, False, False): "move_right",
+        (49, False, False, False, False): "click",
+        (49, False, True, False, False): "right_click",
+        (34, False, False, False, False): "insert_mode",
+        (9, False, False, False, False): "toggle_drag",
+        (11, True, False, False, False): "scroll_up",
+        (3, True, False, False, False): "scroll_down",
+        (11, False, False, False, False): "back",
+        (13, False, False, False, False): "forward",
+        (3, False, False, False, False): "toggle_all_hints",
+        (44, False, False, False, False): "open_launcher",
+        (44, False, True, False, False): "toggle_cheat_sheet",
+    }
     # Mock the AppHelper.callAfter to execute the callback immediately for testing
     mock_pyobjc_tools.AppHelper.callAfter.side_effect = lambda f, *args: f(*args)
     return o
 
 def test_normal_mode_navigation(overlay, mocker):
     mock_event = MagicMock()
-    # Simulate 'h' key (keycode 4)
-    mock_quartz.CGEventGetIntegerValueField.side_effect = lambda ev, field: 4 if field == mock_quartz.kCGKeyboardEventKeycode else 0
+    mock_event.keycode = 4
+    mock_event.repeat = 0
     mock_quartz.CGEventGetFlags.return_value = 0
     
-    # We need to simulate the event tap callback
     result = overlay._normal_tap_callback(None, mock_quartz.kCGEventKeyDown, mock_event, None)
     
-    assert result is None  # Event should be suppressed
+    assert result is None
     overlay._mouse_ctrl.move_relative.assert_called_with(-1, 0, False, False)
 
 def test_drag_mode_navigation(overlay, mocker):
     overlay._dragging = True
     mock_event = MagicMock()
-    # Simulate 'j' key (keycode 38)
-    mock_quartz.CGEventGetIntegerValueField.side_effect = lambda ev, field: 38 if field == mock_quartz.kCGKeyboardEventKeycode else 0
+    mock_event.keycode = 38
+    mock_event.repeat = 0
     mock_quartz.CGEventGetFlags.return_value = 0
     
     result = overlay._normal_tap_callback(None, mock_quartz.kCGEventKeyDown, mock_event, None)
@@ -96,8 +124,8 @@ def test_drag_mode_navigation(overlay, mocker):
 
 def test_click_action(overlay, mocker):
     mock_event = MagicMock()
-    # Simulate space (keycode 49)
-    mock_quartz.CGEventGetIntegerValueField.side_effect = lambda ev, field: 49 if field == mock_quartz.kCGKeyboardEventKeycode else 0
+    mock_event.keycode = 49
+    mock_event.repeat = 0
     mock_quartz.CGEventGetFlags.return_value = 0
     
     mocker.patch.object(overlay, "click_at_cursor")
@@ -108,9 +136,9 @@ def test_click_action(overlay, mocker):
 
 def test_right_click_action(overlay, mocker):
     mock_event = MagicMock()
-    # Simulate shift + space (keycode 49, shift flag)
-    mock_quartz.CGEventGetIntegerValueField.side_effect = lambda ev, field: 49 if field == mock_quartz.kCGKeyboardEventKeycode else 0
-    mock_quartz.CGEventGetFlags.return_value = mock_quartz.kCGEventFlagMaskShift
+    mock_event.keycode = 49
+    mock_event.repeat = 0
+    mock_quartz.CGEventGetFlags.return_value = 2 # Shift
     
     mocker.patch.object(overlay, "right_click_at_cursor")
     result = overlay._normal_tap_callback(None, mock_quartz.kCGEventKeyDown, mock_event, None)
@@ -120,9 +148,9 @@ def test_right_click_action(overlay, mocker):
 
 def test_scroll_actions(overlay, mocker):
     mock_event = MagicMock()
-    # Simulate ctrl + f (keycode 3, ctrl flag)
-    mock_quartz.CGEventGetIntegerValueField.side_effect = lambda ev, field: 3 if field == mock_quartz.kCGKeyboardEventKeycode else 0
-    mock_quartz.CGEventGetFlags.return_value = mock_quartz.kCGEventFlagMaskControl
+    mock_event.keycode = 3
+    mock_event.repeat = 0
+    mock_quartz.CGEventGetFlags.return_value = 8 # Ctrl
     
     mocker.patch.object(overlay, "scroll")
     result = overlay._normal_tap_callback(None, mock_quartz.kCGEventKeyDown, mock_event, None)
@@ -132,8 +160,8 @@ def test_scroll_actions(overlay, mocker):
 
 def test_mouse_back_forward(overlay, mocker):
     mock_event = MagicMock()
-    # Simulate 'b' (keycode 11)
-    mock_quartz.CGEventGetIntegerValueField.side_effect = lambda ev, field: 11 if field == mock_quartz.kCGKeyboardEventKeycode else 0
+    mock_event.keycode = 11
+    mock_event.repeat = 0
     mock_quartz.CGEventGetFlags.return_value = 0
     
     mocker.patch.object(overlay, "mouse_back")
@@ -143,8 +171,8 @@ def test_mouse_back_forward(overlay, mocker):
 
 def test_toggle_hints(overlay, mocker):
     mock_event = MagicMock()
-    # Simulate 'f' (keycode 3)
-    mock_quartz.CGEventGetIntegerValueField.side_effect = lambda ev, field: 3 if field == mock_quartz.kCGKeyboardEventKeycode else 0
+    mock_event.keycode = 3
+    mock_event.repeat = 0
     mock_quartz.CGEventGetFlags.return_value = 0
     
     mocker.patch.object(overlay, "toggle_all_hints")
@@ -154,8 +182,8 @@ def test_toggle_hints(overlay, mocker):
 
 def test_open_launcher(overlay, mocker):
     mock_event = MagicMock()
-    # Simulate '/' (keycode 44)
-    mock_quartz.CGEventGetIntegerValueField.side_effect = lambda ev, field: 44 if field == mock_quartz.kCGKeyboardEventKeycode else 0
+    mock_event.keycode = 44
+    mock_event.repeat = 0
     mock_quartz.CGEventGetFlags.return_value = 0
     
     mocker.patch.object(overlay, "_open_launcher")
@@ -165,8 +193,8 @@ def test_open_launcher(overlay, mocker):
 
 def test_escape_resets_typing(overlay, mocker):
     mock_event = MagicMock()
-    # Simulate Escape (keycode 53)
-    mock_quartz.CGEventGetIntegerValueField.side_effect = lambda ev, field: 53 if field == mock_quartz.kCGKeyboardEventKeycode else 0
+    mock_event.keycode = 53
+    mock_event.repeat = 0
     
     mocker.patch.object(overlay, "reset_typing")
     result = overlay._normal_tap_callback(None, mock_quartz.kCGEventKeyDown, mock_event, None)
@@ -174,17 +202,10 @@ def test_escape_resets_typing(overlay, mocker):
     assert result is None
     overlay.reset_typing.assert_called_once()
 
-def test_insert_mode_passthrough(overlay, mocker):
-    # In insert mode, the tap is normally not active, but we test that it would passthrough if called.
-    overlay._insert_mode = True
-    # Actually, _normal_tap_callback doesn't check self._insert_mode internally,
-    # because it relies on the tap being removed.
-    pass
-
 def test_enter_insert_mode(overlay, mocker):
     mock_event = MagicMock()
-    # Simulate 'i' key (keycode 34)
-    mock_quartz.CGEventGetIntegerValueField.side_effect = lambda ev, field: 34 if field == mock_quartz.kCGKeyboardEventKeycode else 0
+    mock_event.keycode = 34
+    mock_event.repeat = 0
     mock_quartz.CGEventGetFlags.return_value = 0
     
     mocker.patch.object(overlay, "enter_insert_mode")
@@ -198,8 +219,8 @@ def test_menu_mode_navigation(overlay, mocker):
     overlay._install_menu_tap()
     
     mock_event = MagicMock()
-    # Simulate 'k' key (keycode 40)
-    mock_quartz.CGEventGetIntegerValueField.side_effect = lambda ev, field: 40 if field == mock_quartz.kCGKeyboardEventKeycode else 0
+    mock_event.keycode = 40
+    mock_event.repeat = 0
     mock_quartz.CGEventGetFlags.return_value = 0
     
     result = overlay._menu_tap_callback(None, mock_quartz.kCGEventKeyDown, mock_event, None)
