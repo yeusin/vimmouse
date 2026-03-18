@@ -115,6 +115,10 @@ def _scan_apps():
         except OSError:
             pass
 
+    finder_path = "/System/Library/CoreServices/Finder.app"
+    if os.path.isdir(finder_path):
+        items.append(("Finder", finder_path))
+
     items.sort(key=lambda x: x[0].lower())
     return items
 

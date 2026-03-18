@@ -73,7 +73,8 @@ def test_scan_apps_fixed(mocker):
             "/Applications",
             "/Applications/Utilities",
             "/System/Applications",
-            "/System/Library/PreferencePanes"
+            "/System/Library/PreferencePanes",
+            "/System/Library/CoreServices/Finder.app"
         ]
 
     def mock_listdir(path):
@@ -92,13 +93,14 @@ def test_scan_apps_fixed(mocker):
     mocker.patch("os.path.expanduser", return_value="/Users/test/Applications")
 
     apps = _scan_apps()
-    
+
     # Assert sorted order by name
     names = [name for name, path in apps]
-    assert names == ["Calculator", "Displays", "Safari", "Terminal"]
-    
+    assert names == ["Calculator", "Displays", "Finder", "Safari", "Terminal"]
+
     assert ("Calculator", "/System/Applications/Calculator.app") in apps
     assert ("Displays", "/System/Library/PreferencePanes/Displays.prefPane") in apps
+    assert ("Finder", "/System/Library/CoreServices/Finder.app") in apps
     assert ("Safari", "/Applications/Safari.app") in apps
     assert ("Terminal", "/Applications/Utilities/Terminal.app") in apps
 
