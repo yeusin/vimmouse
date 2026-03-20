@@ -1,5 +1,6 @@
 """Alfred-like app/settings launcher UI."""
 
+import json
 import logging
 import os
 
@@ -35,6 +36,49 @@ _MAX_VISIBLE = 9
 _PAD = 12
 _SEARCH_PAD = 16
 _ICON_PAD = 14
+
+_MEMORY_PATH = os.path.expanduser("~/.config/vimlayer/launcher_memory.json")
+
+
+class _SelectionMemory:
+    """Tracks how many times each item was selected for a given query."""
+
+    def __init__(self):
+        self._data = {}  # {query: {path: count}}
+        self._load()
+
+    def _load(self):
+        if os.path.exists(_MEMORY_PATH):
+            try:
+                with open(_MEMORY_PATH, "r") as f:
+                    self._data = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                self._data = {}
+
+    def _save(self):
+        try:
+            os.makedirs(os.path.dirname(_MEMORY_PATH), exist_ok=True)
+            with open(_MEMORY_PATH, "w") as f:
+                json.dump(self._data, f)
+        except OSError:
+            pass
+
+    def record(self, query, path):
+        if not query:
+            return
+        query = query.lower()
+        if query not in self._data:
+            self._data[query] = {}
+        counts = self._data[query]
+        counts[path] = counts.get(path, 0) + 1
+        self._save()
+
+    def get_score(self, query, path):
+        if not query:
+            return 0
+        query = query.lower()
+        return self._data.get(query, {}).get(path, 0)
+
 
 # Colors
 _BG = (0.11, 0.11, 0.13, 0.97)
@@ -245,11 +289,17 @@ class _ResultRowView(NSView):
     def setItem_icon_(self, item, icon):
         name, path = item
         self._name_label.setStringValue_(name)
-        kind = "Settings" if path.endswith(".prefPane") else "Application"
+        if path.startswith("web:"):
+            kind = "Web Search"
+        else:
+            kind = "Settings" if path.endswith(".prefPane") else "Application"
+
         self._kind_label.setStringValue_(kind)
         if icon:
             icon.setSize_(NSMakeSize(_ICON_SIZE, _ICON_SIZE))
             self._icon_view.setImage_(icon)
+        else:
+            self._icon_view.setImage_(None)
 
     def drawRect_(self, rect):
         if self._selected:
@@ -302,6 +352,7 @@ class Launcher:
         self._app_cache = None
         self._icon_cache = {}
         self._scroll_offset = 0
+        self._memory = _SelectionMemory()
 
     def show(self):
         if self._app_cache is None:
@@ -310,6 +361,8 @@ class Launcher:
 
         if self._window is None:
             self._build_window()
+        else:
+            self.recenter()
 
         self._search_field.setStringValue_("")
         self._results = list(self._app_cache)
@@ -329,6 +382,15 @@ class Launcher:
         if self._on_dismiss:
             self._on_dismiss()
 
+    def recenter(self):
+        """Update window position to be centered on the current main screen."""
+        if not self._window:
+            return
+        screen = NSScreen.mainScreen().frame()
+        x = screen.origin.x + (screen.size.width - _WIN_W) / 2
+        y = screen.origin.y + (screen.size.height - _WIN_H) / 2 + screen.size.height * 0.1
+        self._window.setFrame_display_(NSMakeRect(x, y, _WIN_W, _WIN_H), True)
+
     def is_visible(self):
         return self._window is not None and self._window.isVisible()
 
@@ -336,17 +398,24 @@ class Launcher:
         """Get app icon for a path, with caching."""
         icon = self._icon_cache.get(path)
         if icon is None:
-            icon = NSWorkspace.sharedWorkspace().iconForFile_(path)
+            if path.startswith("web:"):
+                # Use default browser icon for web search
+                ws = NSWorkspace.sharedWorkspace()
+                search_url = NSURL.URLWithString_("https://google.com")
+                app_url = ws.URLForApplicationToOpenURL_(search_url)
+                if app_url:
+                    icon = ws.iconForFile_(app_url.path())
+                else:
+                    # Fallback to some generic icon if we can't find browser
+                    icon = ws.iconForFileType_("html")
+            else:
+                icon = NSWorkspace.sharedWorkspace().iconForFile_(path)
             self._icon_cache[path] = icon
         return icon
 
     def _build_window(self):
-        screen = NSScreen.mainScreen().frame()
-        x = (screen.size.width - _WIN_W) / 2
-        y = (screen.size.height - _WIN_H) / 2 + screen.size.height * 0.1
-
         w = _LauncherWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(x, y, _WIN_W, _WIN_H),
+            NSMakeRect(0, 0, _WIN_W, _WIN_H),
             NSWindowStyleMaskBorderless,
             NSBackingStoreBuffered,
             False,
@@ -357,6 +426,9 @@ class Launcher:
         w.setHasShadow_(True)
         w.setReleasedWhenClosed_(False)
         w.setMovableByWindowBackground_(True)
+
+        self._window = w
+        self.recenter()
 
         content = w.contentView()
         content.setWantsLayer_(True)
@@ -435,8 +507,32 @@ class Launcher:
             self._results = list(self._app_cache)
         else:
             matched = [(name, path) for name, path in self._app_cache if _fuzzy_match(query, name)]
-            matched.sort(key=lambda x: _fuzzy_score(query, x[0]))
-            self._results = matched
+            web_item = (f"Search Google for \"{query}\"", f"web:{query}")
+            all_options = matched + [web_item]
+
+            def sort_key(item):
+                name, path = item
+                score = self._memory.get_score(query, path)
+                
+                # Tie-breaking for items with same frequency:
+                # 1. Prefix matches (priority 0)
+                # 2. Web search (priority 1)
+                # 3. Fuzzy matches (priority 2)
+                if path.startswith("web:"):
+                    priority = 1
+                elif name.lower().startswith(query.lower()):
+                    priority = 0
+                else:
+                    priority = 2
+                
+                # Secondary tie-break: fuzzy score for apps
+                f_score = _fuzzy_score(query, name) if not path.startswith("web:") else 0
+                
+                return (-score, priority, f_score)
+
+            all_options.sort(key=sort_key)
+            self._results = all_options
+                    
         self._selected = 0
         self._scroll_offset = 0
         self._update_result_display()
@@ -467,7 +563,19 @@ class Launcher:
         if not self._results or self._selected >= len(self._results):
             return
         name, path = self._results[self._selected]
-        log.info("launcher: opening %s", path)
+        query = str(self._search_field.stringValue())
+        self._memory.record(query, path)
         self.dismiss()
-        url = NSURL.fileURLWithPath_(path)
+
+        if path.startswith("web:"):
+            query = path[4:]
+            import urllib.parse
+
+            search_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
+            log.info("launcher: searching web for %s", query)
+            url = NSURL.URLWithString_(search_url)
+        else:
+            log.info("launcher: opening %s", path)
+            url = NSURL.fileURLWithPath_(path)
+
         NSWorkspace.sharedWorkspace().openURL_(url)
