@@ -4,7 +4,17 @@ import os
 
 # Remove environment variables set by py2app that can interfere with subprocesses.
 # These are set by the py2app bootstrapper but can break external subprocesses.
-for var in ["ARGVZERO", "PYTHONPATH", "PYTHONHOME", "PYTHONUNBUFFERED", "PYTHONDONTWRITEBYTECODE"]:
+for var in [
+    "ARGVZERO",
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PYTHONUNBUFFERED",
+    "PYTHONDONTWRITEBYTECODE",
+    "EXECUTABLEPATH",
+    "RESOURCEPATH",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+]:
     os.environ.pop(var, None)
 
 import logging
