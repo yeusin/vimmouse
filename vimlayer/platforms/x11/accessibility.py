@@ -50,7 +50,7 @@ class X11Accessibility:
             # Atspi.Role.ENTRY, Atspi.Role.TEXT, Atspi.Role.PASSWORD_TEXT, etc.
             # Using names/values if constants aren't easy to access
             role_name = obj.get_role_name()
-            if role_name in ("entry", "text", "password text", "terminal"):
+            if role_name in ("entry", "text", "password text", "terminal", "document"):
                 results.append(obj)
             
             for i in range(obj.get_child_count()):
@@ -70,7 +70,7 @@ class X11Accessibility:
         if not element: return False
         try:
             role_name = element.get_role_name()
-            return role_name in ("entry", "text", "password text", "terminal")
+            return role_name in ("entry", "text", "password text", "terminal", "document")
         except Exception:
             return False
 
