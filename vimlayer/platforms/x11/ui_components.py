@@ -45,6 +45,8 @@ _GLOBAL_TILING_LABELS = {
     "win_sixth_br": "Global Sixth \u2198",
 }
 
+_WM_FLASH_DURATION = 2.0
+
 class HotkeyRecorder(QPushButton):
     hotkeyChanged = pyqtSignal(int, int)
 
@@ -356,6 +358,7 @@ class Watermark(QWidget):
         self.adjustSize()
         self._center_on_screen()
         self.show()
-        if timeout:
-            # Using int(timeout * 1000) for milliseconds
-            QTimer.singleShot(int(timeout * 1000), self.hide)
+        
+        duration = timeout if timeout is not None else _WM_FLASH_DURATION
+        # Using int(duration * 1000) for milliseconds
+        QTimer.singleShot(int(duration * 1000), self.hide)
