@@ -4,10 +4,15 @@ version = "0.0.0"
 description = "Vim-style UI element navigation for macOS"
 requires-python = ">=3.13"
 dependencies = [
-    "pyobjc-framework-Cocoa",
-    "pyobjc-framework-Quartz",
-    "pyobjc-framework-ApplicationServices",
-    "pyobjc>=12.1",
+    "pyobjc-framework-Cocoa; sys_platform == 'darwin'",
+    "pyobjc-framework-Quartz; sys_platform == 'darwin'",
+    "pyobjc-framework-ApplicationServices; sys_platform == 'darwin'",
+    "pyobjc>=12.1; sys_platform == 'darwin'",
+    "PyQt6; sys_platform == 'linux'",
+    "python-xlib; sys_platform == 'linux'",
+    "ewmh; sys_platform == 'linux'",
+    "pynput; sys_platform == 'linux'",
+    "PyGObject; sys_platform == 'linux'",
 ]
 
 [dependency-groups]

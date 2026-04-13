@@ -9,7 +9,6 @@ import Foundation as mock_foundation
 import CoreFoundation as mock_core_foundation
 
 import pytest
-from vimlayer.main import register_global_hotkeys
 
 @pytest.fixture
 def overlay(mocker):
@@ -18,7 +17,9 @@ def overlay(mocker):
     return mock_overlay
 
 def test_register_global_hotkeys(overlay, mocker):
-    mock_hotkey = mocker.patch("vimlayer.main.hotkey")
+    from vimlayer.platforms.mac.provider import MacPlatformProvider
+    provider = MacPlatformProvider()
+    mock_hotkey = mocker.patch.object(provider, "_hotkey")
     
     cfg = {
         "global_tiling_bindings": {
@@ -27,7 +28,7 @@ def test_register_global_hotkeys(overlay, mocker):
         }
     }
     
-    register_global_hotkeys(overlay, cfg)
+    provider._register_global_hotkeys(overlay, cfg)
     
     # Check that hotkey.unregister_all was called
     mock_hotkey.unregister_all.assert_called_once()
