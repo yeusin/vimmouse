@@ -314,6 +314,10 @@ class Watermark(QWidget):
     def __init__(self, mode="NORMAL"):
         super().__init__()
         log.debug("Initializing Watermark")
+        self._hide_timer = QTimer(self)
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.timeout.connect(self.hide)
+        
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint | 
             Qt.WindowType.FramelessWindowHint | 
@@ -359,6 +363,10 @@ class Watermark(QWidget):
             (screen.height() - self.height()) // 2
         )
 
+    def hide(self):
+        self._hide_timer.stop()
+        super().hide()
+
     def show_mode(self, mode, timeout=None):
         log.debug("Watermark.show_mode mode=%s, timeout=%s", mode, timeout)
         self.mode_label.setText(mode)
@@ -368,5 +376,5 @@ class Watermark(QWidget):
         
         duration = timeout if timeout is not None else _WM_FLASH_DURATION
         log.debug("Watermark will hide in %s seconds", duration)
-        # Using int(duration * 1000) for milliseconds
-        QTimer.singleShot(int(duration * 1000), self.hide)
+        # Reset and start the timer
+        self._hide_timer.start(int(duration * 1000))

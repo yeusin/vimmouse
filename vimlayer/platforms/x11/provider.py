@@ -71,6 +71,8 @@ class X11PlatformProvider(PlatformProvider):
         self._ui = X11UI()
         self._app = None
         self._tray = None
+        self._overlay = None
+        self._current_mode = None
 
     @property
     def window_manager(self): return self._window_manager
@@ -172,18 +174,18 @@ class X11PlatformProvider(PlatformProvider):
         self._app = QApplication(sys.argv)
         self._app.setQuitOnLastWindowClosed(False)
 
-        overlay = self._ui.create_hint_overlay(on_mode_change=self._on_mode_change)
+        self._overlay = self._ui.create_hint_overlay(on_mode_change=self._on_mode_change)
         
         self._setup_tray()
 
         def on_hotkey():
             log.info("Primary hotkey triggered, showing overlay")
-            overlay.return_to_normal()
+            self._overlay.return_to_normal()
 
         cfg = config.load()
         log.info("Registering primary hotkey")
         self._hotkey.register(on_hotkey, keycode=cfg["keycode"], flags=cfg["flags"], is_primary=True)
-        self._register_global_hotkeys(overlay, cfg)
+        self._register_global_hotkeys(self._overlay, cfg)
         
         self._hotkey.set_focus_handler(self._on_focus_change)
 
@@ -194,7 +196,7 @@ class X11PlatformProvider(PlatformProvider):
         self._timer.timeout.connect(self._hotkey.process_events)
         self._timer.start(10) # 10ms polling
 
-        overlay.show()
+        self._overlay.show()
 
         signal.signal(signal.SIGINT, lambda *_: self._app.quit())
         log.info("Application entering event loop")
@@ -211,6 +213,13 @@ class X11PlatformProvider(PlatformProvider):
                 pid = prop.value[0]
                 log.info("Focused window PID: %d", pid)
                 inputs = self._accessibility.find_input_elements(pid)
+                
+                # Auto-insert logic
+                cfg = config.load()
+                if cfg.get("auto_insert_mode", True) and inputs and self._overlay:
+                    log.info("Auto-entering INSERT mode due to input elements")
+                    self._overlay.enter_insert_mode()
+                
                 for i, el in enumerate(inputs):
                     try:
                         log.info("  Input %d: role=%s, name=%s", i, el.get_role_name(), el.get_name())
@@ -255,7 +264,11 @@ class X11PlatformProvider(PlatformProvider):
         return QIcon(pixmap)
 
     def _on_mode_change(self, mode: Optional[str]):
-        log.info("Mode changed: %s", mode or "NORMAL")
+        if mode == self._current_mode:
+            return
+            
+        log.info("Mode changed: %s -> %s", self._current_mode, mode or "NORMAL")
+        self._current_mode = mode
         display_mode = mode or "NORMAL"
         
         # Update tray
